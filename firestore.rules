@@ -1,0 +1,215 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Helper Functions
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Authenticated user
+    function isAuthed() {
+      return request.auth != null;
+    }
+
+    // Admin check: admins collection OR users collection role OR hardcoded email
+    function isAdmin() {
+      return isAuthed() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        request.auth.token.email == "munjaganesh05@gmail.com"
+      );
+    }
+
+    // The caller is the owner of the document (uid == userId)
+    function isSelf(userId) {
+      return isAuthed() && request.auth.uid == userId;
+    }
+
+    // The caller owns the restaurant being accessed
+    function isRestaurantOwner(restaurantId) {
+      return isAuthed() &&
+        exists(/databases/$(database)/documents/restaurants/$(restaurantId)) &&
+        get(/databases/$(database)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid;
+    }
+
+    // Only allow known role values
+    function validRole() {
+      return request.resource.data.role in ['admin', 'restaurant', 'rider', 'customer'];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /admins/{adminId}
+    //  Only admins can read/write this collection
+    // ─────────────────────────────────────────────────────────────────────────
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /users/{userId}
+    //  - Each user can read/write their own document
+    //  - Admin can read/write all user documents
+    //  - Role cannot be self-escalated (no one can set role='admin' themselves)
+    // ─────────────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+
+      allow create: if isSelf(userId) && validRole() &&
+        // Prevent self-granting admin
+        request.resource.data.role != 'admin';
+
+      allow update: if (isSelf(userId) &&
+        // Prevent self-escalating to admin
+        (!('role' in request.resource.data) || request.resource.data.role == resource.data.role)
+      ) || isAdmin();
+
+      allow delete: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /restaurants/{restaurantId}
+    //  - Any authenticated user can read (for the customer app)
+    //  - Admin can write all fields
+    //  - Restaurant owner can update their own record (limited fields)
+    // ─────────────────────────────────────────────────────────────────────────
+    match /restaurants/{restaurantId} {
+      allow read: if isAuthed();
+
+      allow create: if isAdmin() ||
+        // Restaurant owners can submit their own registration
+        (isAuthed() && request.resource.data.ownerId == request.auth.uid &&
+         request.resource.data.approved == false &&
+         request.resource.data.status == 'pending');
+
+      allow update: if isAdmin() || (
+        isRestaurantOwner(restaurantId) &&
+        // Owner can only update operational fields, not approval/status/financial
+        !('approved' in request.resource.data) &&
+        !('status' in request.resource.data) &&
+        !('ownerId' in request.resource.data) &&
+        !('bankAccountNumber' in request.resource.data) &&
+        !('totalEarnings' in request.resource.data)
+      );
+
+      allow delete: if isAdmin();
+
+      // ── /restaurants/{restaurantId}/menuItems/{itemId} ──────────────────
+      match /menuItems/{itemId} {
+        allow read: if isAuthed();
+        allow write: if isAdmin() || isRestaurantOwner(restaurantId);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /orders/{orderId}
+    //  - Authenticated users can create orders
+    //  - Customers can read their own orders
+    //  - Riders can read orders assigned to them
+    //  - Restaurants can read orders for their restaurant
+    //  - Admin can read/write all
+    //  - Orders can never be hard-deleted
+    // ─────────────────────────────────────────────────────────────────────────
+    match /orders/{orderId} {
+      allow read: if isAdmin() ||
+        (isAuthed() && resource.data.customerId == request.auth.uid) ||
+        (isAuthed() && resource.data.riderId == request.auth.uid) ||
+        (isAuthed() && exists(/databases/$(database)/documents/restaurants/$(resource.data.restaurantId)) &&
+          get(/databases/$(database)/documents/restaurants/$(resource.data.restaurantId)).data.ownerId == request.auth.uid);
+
+      allow create: if isAuthed() &&
+        request.resource.data.customerId == request.auth.uid;
+
+      allow update: if isAdmin() ||
+        // Customer can cancel their own pending order
+        (isAuthed() &&
+          resource.data.customerId == request.auth.uid &&
+          resource.data.status == 'pending' &&
+          request.resource.data.status == 'cancelled') ||
+        // Rider can update status of assigned order
+        (isAuthed() && resource.data.riderId == request.auth.uid) ||
+        // Restaurant can update status
+        (isAuthed() && exists(/databases/$(database)/documents/restaurants/$(resource.data.restaurantId)) &&
+          get(/databases/$(database)/documents/restaurants/$(resource.data.restaurantId)).data.ownerId == request.auth.uid);
+
+      allow delete: if false; // Orders are never deleted
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /payouts/{payoutId}
+    //  - Admin only read/write
+    //  - Restaurants/riders can read their own payouts
+    // ─────────────────────────────────────────────────────────────────────────
+    match /payouts/{payoutId} {
+      allow read: if isAdmin() ||
+        (isAuthed() && resource.data.entityId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /promocodes/{promoId}
+    //  - Authenticated users can read (needed at checkout)
+    //  - Admin only write
+    // ─────────────────────────────────────────────────────────────────────────
+    match /promocodes/{promoId} {
+      allow read: if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /settings/{docId}
+    //  - Authenticated users can read (customer/rider apps need delivery fees)
+    //  - Admin only write
+    // ─────────────────────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if isAuthed();
+      allow write: if isAdmin();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /riderLocations/{riderId}
+    //  - Admin can read all
+    //  - Rider can read/write their own location
+    //  - Restaurant/customer cannot access
+    // ─────────────────────────────────────────────────────────────────────────
+    match /riderLocations/{riderId} {
+      allow read: if isAdmin() || isSelf(riderId);
+      allow write: if isAdmin() || isSelf(riderId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /riderEarnings/{riderId}
+    //  /riderEarnings/{riderId}/history/{entryId}
+    // ─────────────────────────────────────────────────────────────────────────
+    match /riderEarnings/{riderId} {
+      allow read: if isAdmin() || isSelf(riderId);
+      allow write: if isAdmin();
+
+      match /history/{entryId} {
+        allow read: if isAdmin() || isSelf(riderId);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  /restaurantEarnings/{restaurantId}
+    //  /restaurantEarnings/{restaurantId}/history/{entryId}
+    // ─────────────────────────────────────────────────────────────────────────
+    match /restaurantEarnings/{restaurantId} {
+      allow read: if isAdmin() || isRestaurantOwner(restaurantId);
+      allow write: if isAdmin();
+
+      match /history/{entryId} {
+        allow read: if isAdmin() || isRestaurantOwner(restaurantId);
+        allow write: if isAdmin();
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Deny everything else
+    // ─────────────────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

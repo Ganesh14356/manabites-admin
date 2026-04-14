@@ -1,0 +1,802 @@
+import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import toast from 'react-hot-toast';
+import {
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signOut,
+} from 'firebase/auth';
+import {
+  collection, doc, setDoc, updateDoc, query, where,
+  onSnapshot, orderBy, getDocs, Timestamp, serverTimestamp,
+} from 'firebase/firestore';
+import { auth, db, secondaryAuth } from '../../firebase';
+import {
+  Plus, Edit2, Key, ToggleLeft, ToggleRight, Search, Copy,
+  AlertTriangle, X, Check, Eye, EyeOff, Bike,
+  Map as MapIcon, List, DollarSign, FileCheck, FileX, ShoppingBag,
+  TrendingUp,
+} from 'lucide-react';
+
+// ── Lazy-load Leaflet (avoids SSR issues) ─────────────────────────────────────
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix default marker icons for bundlers
+// Use divIcon to avoid btoa/emoji encoding issues
+const onlineIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:36px;height:36px;background:#22c55e;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:18px">&#x1F6F5;</div>`,
+  iconSize: [36, 36],
+  iconAnchor: [18, 36],
+  popupAnchor: [0, -38],
+});
+
+const offlineIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:36px;height:36px;background:#9ca3af;border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:18px">&#x1F6F5;</div>`,
+  iconSize: [36, 36],
+  iconAnchor: [18, 36],
+  popupAnchor: [0, -38],
+});
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface RiderDoc {
+  uid: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: 'rider';
+  isActive: boolean;
+  vehicleType?: string;
+  vehicleNumber?: string;
+  licenseDocUrl?: string;
+  licenseApproved?: boolean;
+  bankAccountNumber?: string;
+  bankIFSC?: string;
+  bankDocUrl?: string;
+  bankApproved?: boolean;
+  createdAt: Timestamp;
+}
+
+interface RiderLocation {
+  riderId: string;
+  riderName: string;
+  lat: number;
+  lng: number;
+  isOnline: boolean;
+  currentOrderId?: string;
+  updatedAt: any;
+}
+
+interface EarningEntry {
+  id: string;
+  orderId: string;
+  restaurantName: string;
+  customerName: string;
+  deliveryFeeEarned: number;
+  distance: number;
+  createdAt: any;
+}
+
+type Tab = 'list' | 'map' | 'earnings';
+type DocApprovalField = 'licenseApproved' | 'bankApproved';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function generatePassword(length = 12): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => chars[b % chars.length]).join('');
+}
+
+function formatDate(ts: any): string {
+  if (!ts) return '—';
+  const d = ts?.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function getFirebaseError(err: unknown): string {
+  const code = (err as any)?.code ?? '';
+  const map: Record<string, string> = {
+    'auth/email-already-in-use': 'This email is already registered.',
+    'auth/invalid-email': 'Invalid email address.',
+    'auth/weak-password': 'Password too weak (min 8 chars).',
+  };
+  return map[code] ?? (err as any)?.message ?? 'Unknown error';
+}
+
+// ── Zod Schema ────────────────────────────────────────────────────────────────
+
+const riderSchema = z.object({
+  name: z.string().min(2).max(100),
+  email: z.string().email(),
+  phone: z.string().regex(/^[6-9]\d{9}$/, 'Valid 10-digit Indian mobile required'),
+  vehicleType: z.enum(['Bike', 'Scooter', 'Bicycle']),
+  vehicleNumber: z.string().min(4).max(20),
+  licenseNumber: z.string().optional(),
+  bankAccountNumber: z.string().optional(),
+  bankIFSC: z.string().optional(),
+});
+type RiderFormData = z.infer<typeof riderSchema>;
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
+export default function RiderManagement() {
+  const [tab, setTab] = useState<Tab>('list');
+
+  // List state
+  const [riders, setRiders] = useState<RiderDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+
+  // Modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editTarget, setEditTarget] = useState<RiderDoc | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [generatedPass, setGeneratedPass] = useState({ password: '', email: '', name: '' });
+  const [showPass, setShowPass] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Map state
+  const [riderLocations, setRiderLocations] = useState<RiderLocation[]>([]);
+
+  // Earnings state
+  const [selectedRiderForEarnings, setSelectedRiderForEarnings] = useState<RiderDoc | null>(null);
+  const [earnings, setEarnings] = useState<EarningEntry[]>([]);
+  const [earningsLoading, setEarningsLoading] = useState(false);
+  const [totalEarnings, setTotalEarnings] = useState(0);
+
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<RiderFormData>({
+    resolver: zodResolver(riderSchema),
+    defaultValues: { vehicleType: 'Bike' },
+  });
+
+  // ── Listeners ──────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const q = query(collection(db, 'users'), where('role', '==', 'rider'));
+    const unsub = onSnapshot(q, snap => {
+      setRiders(
+        snap.docs
+          .map(d => ({ uid: d.id, ...d.data() } as RiderDoc))
+          .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0))
+      );
+      setLoading(false);
+    }, err => { toast.error('Failed to load riders: ' + err.message); setLoading(false); });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (tab !== 'map') return;
+    const unsub = onSnapshot(collection(db, 'riderLocations'), snap => {
+      setRiderLocations(snap.docs.map(d => ({ riderId: d.id, ...d.data() } as RiderLocation)));
+    });
+    return () => unsub();
+  }, [tab]);
+
+  // ── Earnings load ──────────────────────────────────────────────────────────
+
+  const loadEarnings = async (rider: RiderDoc) => {
+    setSelectedRiderForEarnings(rider);
+    setEarningsLoading(true);
+    try {
+      // Sum from delivered orders where riderId matches
+      const snap = await getDocs(
+        query(collection(db, 'orders'), where('riderId', '==', rider.uid), where('status', '==', 'delivered'))
+      );
+      const entries: EarningEntry[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          orderId: d.id,
+          restaurantName: data.restaurantName || '—',
+          customerName: data.customerName || '—',
+          deliveryFeeEarned: data.deliveryFee || 0,
+          distance: data.distanceKm || 0,
+          createdAt: data.createdAt,
+        };
+      }).sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+
+      setEarnings(entries);
+      setTotalEarnings(entries.reduce((s, e) => s + e.deliveryFeeEarned, 0));
+    } catch (err) {
+      toast.error('Failed to load earnings');
+    } finally {
+      setEarningsLoading(false);
+    }
+  };
+
+  // ── Filters ────────────────────────────────────────────────────────────────
+
+  const filtered = useMemo(() => riders.filter(r => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch = !searchQuery ||
+      r.name.toLowerCase().includes(q) ||
+      r.email.toLowerCase().includes(q) ||
+      r.phone.includes(searchQuery);
+    const matchStatus =
+      statusFilter === 'all' ? true :
+      statusFilter === 'active' ? r.isActive :
+      !r.isActive;
+    return matchSearch && matchStatus;
+  }), [riders, searchQuery, statusFilter]);
+
+  const stats = useMemo(() => ({
+    total: riders.length,
+    active: riders.filter(r => r.isActive).length,
+    inactive: riders.filter(r => !r.isActive).length,
+    pendingDocs: riders.filter(r => (r.licenseDocUrl && !r.licenseApproved) || (r.bankDocUrl && !r.bankApproved)).length,
+  }), [riders]);
+
+  const onlineCount = riderLocations.filter(r => r.isOnline).length;
+
+  // ── Form Submit ────────────────────────────────────────────────────────────
+
+  const onSubmit = async (data: RiderFormData) => {
+    setIsSubmitting(true);
+    setFormError(null);
+    try {
+      if (editTarget) {
+        await updateDoc(doc(db, 'users', editTarget.uid), {
+          name: data.name,
+          phone: data.phone,
+          vehicleType: data.vehicleType,
+          vehicleNumber: data.vehicleNumber,
+          licenseNumber: data.licenseNumber || null,
+          bankAccountNumber: data.bankAccountNumber || null,
+          bankIFSC: data.bankIFSC || null,
+          updatedAt: serverTimestamp(),
+        });
+        toast.success('Rider updated');
+        closeModal();
+      } else {
+        const password = generatePassword(12);
+        const { user } = await createUserWithEmailAndPassword(secondaryAuth, data.email, password);
+        const uid = user.uid;
+        await signOut(secondaryAuth);
+        await setDoc(doc(db, 'users', uid), {
+          uid, email: data.email, name: data.name, phone: data.phone,
+          role: 'rider', isActive: true,
+          vehicleType: data.vehicleType, vehicleNumber: data.vehicleNumber,
+          licenseNumber: data.licenseNumber || null,
+          bankAccountNumber: data.bankAccountNumber || null,
+          bankIFSC: data.bankIFSC || null,
+          licenseApproved: false, bankApproved: false,
+          createdAt: serverTimestamp(),
+        });
+        closeModal();
+        setGeneratedPass({ password, email: data.email, name: data.name });
+        setShowPasswordModal(true);
+      }
+    } catch (err) {
+      setFormError(getFirebaseError(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleStatus = async (rider: RiderDoc) => {
+    try {
+      await updateDoc(doc(db, 'users', rider.uid), { isActive: !rider.isActive });
+      toast.success(`Rider ${!rider.isActive ? 'activated' : 'suspended'}`);
+    } catch { toast.error('Failed to update status'); }
+  };
+
+  const handleDocApproval = async (rider: RiderDoc, field: DocApprovalField, approve: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', rider.uid), { [field]: approve });
+      toast.success(`Document ${approve ? 'approved' : 'rejected'}`);
+    } catch { toast.error('Failed to update document status'); }
+  };
+
+  const handleResetPassword = async (rider: RiderDoc) => {
+    try {
+      await sendPasswordResetEmail(auth, rider.email);
+      toast.success(`Reset email sent to ${rider.email}`);
+    } catch (err) { toast.error(getFirebaseError(err)); }
+  };
+
+  const openEditModal = (r: RiderDoc) => {
+    setEditTarget(r);
+    reset({
+      name: r.name, email: r.email, phone: r.phone,
+      vehicleType: (r.vehicleType as any) ?? 'Bike',
+      vehicleNumber: r.vehicleNumber ?? '',
+      licenseNumber: (r as any).licenseNumber ?? '',
+      bankAccountNumber: r.bankAccountNumber ?? '',
+      bankIFSC: r.bankIFSC ?? '',
+    });
+    setShowAddModal(true);
+  };
+
+  const closeModal = () => {
+    setShowAddModal(false); setEditTarget(null);
+    reset({ name: '', email: '', phone: '', vehicleType: 'Bike', vehicleNumber: '' });
+    setFormError(null);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-black text-gray-800">Rider Management</h1>
+          <p className="text-gray-400 text-sm mt-0.5">Manage delivery partners</p>
+        </div>
+        {tab === 'list' && (
+          <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowAddModal(true)} className="btn-primary w-auto px-5">
+            <Plus className="w-5 h-5" /> Add Rider
+          </motion.button>
+        )}
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: 'Total Riders', value: stats.total, color: 'border-brand' },
+          { label: 'Active', value: stats.active, color: 'border-green-500' },
+          { label: 'Inactive', value: stats.inactive, color: 'border-red-400' },
+          { label: 'Docs Pending', value: stats.pendingDocs, color: 'border-yellow-400' },
+        ].map(s => (
+          <div key={s.label} className={`bg-white rounded-2xl shadow-card p-4 border-l-4 ${s.color}`}>
+            <p className="text-2xl font-black text-gray-800">{s.value}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-5 bg-gray-100 p-1 rounded-xl w-fit">
+        {([
+          { key: 'list', label: 'Rider List', icon: List },
+          { key: 'map', label: `Live Map ${onlineCount > 0 ? `(${onlineCount} online)` : ''}`, icon: MapIcon },
+          { key: 'earnings', label: 'Earnings', icon: DollarSign },
+        ] as { key: Tab; label: string; icon: any }[]).map(t => (
+          <button
+            key={t.key}
+            onClick={() => { setTab(t.key); if (t.key !== 'earnings') setSelectedRiderForEarnings(null); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${tab === t.key ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            <t.icon className="w-4 h-4" /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── TAB: List ─────────────────────────────────────────────────────── */}
+      {tab === 'list' && (
+        <>
+          <div className="flex gap-3 mb-5">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search name, email, phone..." className="input-field pl-10" />
+            </div>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="input-field w-36">
+              <option value="all">All Status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12 text-gray-400">Loading riders...</div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="table-header">Rider</th>
+                      <th className="table-header">Contact</th>
+                      <th className="table-header">Vehicle</th>
+                      <th className="table-header">Documents</th>
+                      <th className="table-header">Status</th>
+                      <th className="table-header">Joined</th>
+                      <th className="table-header">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <AnimatePresence>
+                      {filtered.map(r => (
+                        <motion.tr key={r.uid} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="border-b border-gray-50 hover:bg-gray-50">
+                          <td className="table-cell font-semibold text-gray-800">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-black text-sm">
+                                {r.name.charAt(0).toUpperCase()}
+                              </div>
+                              {r.name}
+                            </div>
+                          </td>
+                          <td className="table-cell">
+                            <div className="text-gray-800">{r.phone}</div>
+                            <div className="text-gray-500 text-xs">{r.email}</div>
+                          </td>
+                          <td className="table-cell">
+                            <div className="flex items-center gap-1.5 text-gray-700">
+                              <Bike className="w-4 h-4 text-gray-400" />
+                              {r.vehicleType ?? '—'}
+                            </div>
+                            <div className="text-gray-500 text-xs font-mono mt-0.5">{r.vehicleNumber ?? '—'}</div>
+                          </td>
+                          <td className="table-cell">
+                            <div className="flex gap-1 flex-wrap">
+                              {r.licenseDocUrl ? (
+                                r.licenseApproved
+                                  ? <span className="badge bg-green-100 text-green-700 text-[10px]">✓ License</span>
+                                  : (
+                                    <div className="flex gap-1">
+                                      <button onClick={() => handleDocApproval(r, 'licenseApproved', true)} className="badge bg-green-100 text-green-700 text-[10px] hover:bg-green-200">
+                                        <FileCheck className="w-3 h-3" /> License
+                                      </button>
+                                      <button onClick={() => handleDocApproval(r, 'licenseApproved', false)} className="badge bg-red-100 text-red-700 text-[10px] hover:bg-red-200">
+                                        <FileX className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )
+                              ) : <span className="text-gray-300 text-xs">No license</span>}
+
+                              {r.bankDocUrl ? (
+                                r.bankApproved
+                                  ? <span className="badge bg-blue-100 text-blue-700 text-[10px]">✓ Bank</span>
+                                  : (
+                                    <div className="flex gap-1">
+                                      <button onClick={() => handleDocApproval(r, 'bankApproved', true)} className="badge bg-blue-100 text-blue-700 text-[10px] hover:bg-blue-200">
+                                        <FileCheck className="w-3 h-3" /> Bank
+                                      </button>
+                                      <button onClick={() => handleDocApproval(r, 'bankApproved', false)} className="badge bg-red-100 text-red-700 text-[10px] hover:bg-red-200">
+                                        <FileX className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  )
+                              ) : <span className="text-gray-300 text-xs ml-1">No bank</span>}
+                            </div>
+                          </td>
+                          <td className="table-cell">
+                            <span className={`badge ${r.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {r.isActive ? '● Active' : '● Inactive'}
+                            </span>
+                          </td>
+                          <td className="table-cell text-gray-400 text-xs">{formatDate(r.createdAt)}</td>
+                          <td className="table-cell">
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => openEditModal(r)} className="w-8 h-8 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center hover:bg-blue-100" title="Edit">
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => handleResetPassword(r)} className="w-8 h-8 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center hover:bg-yellow-100" title="Reset Password">
+                                <Key className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => { setTab('earnings'); loadEarnings(r); }} className="w-8 h-8 bg-green-50 text-green-600 rounded-lg flex items-center justify-center hover:bg-green-100" title="View Earnings">
+                                <DollarSign className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleToggleStatus(r)}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${r.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+                              >
+                                {r.isActive ? <><ToggleRight className="w-3.5 h-3.5" /> Suspend</> : <><ToggleLeft className="w-3.5 h-3.5" /> Activate</>}
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
+                {filtered.length === 0 && <div className="text-center py-16 text-gray-400">No riders found</div>}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── TAB: Map ─────────────────────────────────────────────────────── */}
+      {tab === 'map' && (
+        <div className="space-y-4">
+          <div className="flex gap-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-green-600">
+              <span className="w-3 h-3 rounded-full bg-green-500 inline-block" /> Online ({riderLocations.filter(r => r.isOnline).length})
+            </div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-400">
+              <span className="w-3 h-3 rounded-full bg-gray-400 inline-block" /> Offline ({riderLocations.filter(r => !r.isOnline).length})
+            </div>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-card overflow-hidden" style={{ height: 500 }}>
+            {typeof window !== 'undefined' && (
+              <MapContainer
+                center={[17.385, 78.4867]}
+                zoom={12}
+                style={{ height: '100%', width: '100%' }}
+              >
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                />
+                {riderLocations.map(loc => (
+                  <Marker
+                    key={loc.riderId}
+                    position={[loc.lat, loc.lng]}
+                    icon={loc.isOnline ? onlineIcon : offlineIcon}
+                  >
+                    <Popup>
+                      <div className="min-w-[160px]">
+                        <p className="font-bold text-gray-800">{loc.riderName}</p>
+                        <p className={`text-xs font-semibold mt-1 ${loc.isOnline ? 'text-green-600' : 'text-gray-400'}`}>
+                          {loc.isOnline ? '● Online' : '● Offline'}
+                        </p>
+                        {loc.currentOrderId && (
+                          <p className="text-xs text-blue-600 mt-1">On delivery: {loc.currentOrderId.slice(0, 8)}</p>
+                        )}
+                        <p className="text-xs text-gray-400 mt-1">
+                          {loc.lat.toFixed(4)}, {loc.lng.toFixed(4)}
+                        </p>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+              </MapContainer>
+            )}
+          </div>
+
+          {/* Location list */}
+          {riderLocations.length === 0 && (
+            <div className="bg-white rounded-2xl shadow-card p-8 text-center text-gray-400">
+              <MapIcon className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="font-semibold">No rider location data</p>
+              <p className="text-sm mt-1">Locations appear here when riders are active in the app</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: Earnings ───────────────────────────────────────────────── */}
+      {tab === 'earnings' && (
+        <div className="space-y-4">
+          {/* Rider Selector */}
+          <div className="bg-white rounded-2xl shadow-card p-4">
+            <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wider mb-3">Select Rider</h3>
+            <div className="flex flex-wrap gap-2">
+              {riders.map(r => (
+                <button
+                  key={r.uid}
+                  onClick={() => loadEarnings(r)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all border ${
+                    selectedRiderForEarnings?.uid === r.uid
+                      ? 'bg-brand text-white border-brand'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:border-brand hover:text-brand'
+                  }`}
+                >
+                  <Bike className="w-4 h-4" /> {r.name}
+                </button>
+              ))}
+              {riders.length === 0 && <p className="text-gray-400 text-sm">No riders found</p>}
+            </div>
+          </div>
+
+          {/* Earnings Detail */}
+          {selectedRiderForEarnings && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {[
+                  { label: 'Total Earned', value: `₹${totalEarnings.toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+                  { label: 'Deliveries', value: earnings.length, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { label: 'Avg per Delivery', value: earnings.length ? `₹${(totalEarnings / earnings.length).toFixed(0)}` : '—', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
+                ].map(s => (
+                  <div key={s.label} className="bg-white rounded-2xl shadow-card p-5">
+                    <div className={`w-9 h-9 ${s.bg} rounded-xl flex items-center justify-center mb-3`}>
+                      <s.icon className={`w-5 h-5 ${s.color}`} />
+                    </div>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{s.label}</p>
+                    <p className="text-2xl font-black text-gray-800 mt-0.5">{s.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-100">
+                  <h3 className="font-bold text-gray-800">Delivery History — {selectedRiderForEarnings.name}</h3>
+                </div>
+                {earningsLoading ? (
+                  <div className="p-8 text-center text-gray-400">Loading...</div>
+                ) : earnings.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400">No completed deliveries yet</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-100">
+                        <tr>
+                          <th className="table-header">Order ID</th>
+                          <th className="table-header">Restaurant</th>
+                          <th className="table-header">Customer</th>
+                          <th className="table-header">Earned</th>
+                          <th className="table-header">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {earnings.map(e => (
+                          <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="table-cell font-mono text-xs text-gray-500">{e.orderId.slice(0, 8).toUpperCase()}</td>
+                            <td className="table-cell font-semibold text-gray-800">{e.restaurantName}</td>
+                            <td className="table-cell text-gray-600">{e.customerName}</td>
+                            <td className="table-cell font-bold text-green-600">₹{e.deliveryFeeEarned.toFixed(2)}</td>
+                            <td className="table-cell text-gray-400 text-xs">{formatDate(e.createdAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {!selectedRiderForEarnings && (
+            <div className="bg-white rounded-2xl shadow-card p-12 text-center text-gray-400">
+              <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="font-semibold">Select a rider above to view their earnings</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Add / Edit Modal ───────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showAddModal && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-40" onClick={closeModal} />
+            <motion.div
+              initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white z-50 shadow-2xl overflow-y-auto"
+            >
+              <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+                <h2 className="text-lg font-black text-gray-800">{editTarget ? 'Edit Rider' : 'Add Rider'}</h2>
+                <button onClick={closeModal} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><X className="w-4 h-4" /></button>
+              </div>
+
+              <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-5">
+                {formError && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" /> {formError}
+                  </div>
+                )}
+
+                <section>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Basic Info</p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Full Name *</label>
+                      <input {...register('name')} className={`input-field ${errors.name ? 'border-red-400' : ''}`} placeholder="John Doe" />
+                      {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Email *</label>
+                      <input {...register('email')} type="email" disabled={!!editTarget} className={`input-field ${errors.email ? 'border-red-400' : ''} ${editTarget ? 'bg-gray-100 text-gray-500' : ''}`} placeholder="rider@example.com" />
+                      {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Phone *</label>
+                      <input {...register('phone')} type="tel" className={`input-field ${errors.phone ? 'border-red-400' : ''}`} placeholder="9876543210" />
+                      {errors.phone && <p className="text-red-500 text-xs mt-1">{errors.phone.message}</p>}
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Vehicle</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Type *</label>
+                      <select {...register('vehicleType')} className="input-field">
+                        <option value="Bike">Bike</option>
+                        <option value="Scooter">Scooter</option>
+                        <option value="Bicycle">Bicycle</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Number *</label>
+                      <input {...register('vehicleNumber')} className={`input-field ${errors.vehicleNumber ? 'border-red-400' : ''}`} placeholder="TS09EA1234" />
+                      {errors.vehicleNumber && <p className="text-red-500 text-xs mt-1">{errors.vehicleNumber.message}</p>}
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Documents (Optional)</p>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">DL Number</label>
+                      <input {...register('licenseNumber')} className="input-field" placeholder="TS0920200012345" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Bank Account</label>
+                        <input {...register('bankAccountNumber')} className="input-field" placeholder="Account number" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">IFSC</label>
+                        <input {...register('bankIFSC')} className="input-field" placeholder="SBIN0001234" />
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <motion.button type="submit" disabled={isSubmitting} whileTap={{ scale: 0.97 }} className="btn-primary w-full disabled:opacity-60">
+                  {isSubmitting ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : editTarget ? 'Save Changes' : 'Add Rider'}
+                </motion.button>
+              </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── Password Modal ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showPasswordModal && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-md mx-auto bg-white rounded-3xl shadow-2xl p-6"
+            >
+              <div className="text-center mb-5">
+                <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Check className="w-7 h-7 text-green-600" />
+                </div>
+                <h2 className="text-xl font-black text-gray-800">Rider Created!</h2>
+                <p className="text-sm text-gray-500 mt-1">{generatedPass.name}</p>
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4">
+                <p className="text-xs text-yellow-700 font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" /> Save this password — it won't be shown again!
+                </p>
+              </div>
+              <div className="space-y-3 mb-5">
+                <div className="bg-gray-50 rounded-xl p-3">
+                  <p className="text-xs text-gray-400 font-semibold mb-1">Email</p>
+                  <p className="font-mono text-sm text-gray-800">{generatedPass.email}</p>
+                </div>
+                <div className="bg-gray-50 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs text-gray-400 font-semibold">Temporary Password</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => setShowPass(!showPass)} className="p-1 text-gray-400 hover:text-gray-600">
+                        {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                      <button onClick={() => copyToClipboard(`Email: ${generatedPass.email}\nPassword: ${generatedPass.password}`)} className="p-1 text-gray-400 hover:text-gray-600">
+                        {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="font-mono text-base text-gray-800 tracking-wider">
+                    {showPass ? generatedPass.password : '•'.repeat(generatedPass.password.length)}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowPasswordModal(false)} className="w-full bg-brand text-white font-bold py-3 rounded-2xl hover:bg-brand-dark">
+                Done — I've saved the password
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
