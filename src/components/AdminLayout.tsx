@@ -1,7 +1,7 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import {
-  Store, Users, Bike, Settings, LogOut, Menu, X, ShoppingBag,
-  BarChart2, DollarSign, Tag, ShieldCheck, UserCheck, CreditCard, Image,
+  Store, Users, Settings, LogOut, Menu, X, ShoppingBag,
+  BarChart2, DollarSign, Tag, ShieldCheck, CreditCard, Image,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -15,8 +15,6 @@ const BASE_NAV = [
   { name: 'Orders',               path: '/admin/orders',               icon: ShoppingBag },
   { name: 'Restaurants',          path: '/admin/restaurants',          icon: Store      },
   { name: 'Approvals',            path: '/admin/restaurants-approval', icon: ShieldCheck },
-  { name: 'Riders',               path: '/admin/riders',               icon: Bike       },
-  { name: 'Rider Approvals',      path: '/admin/riders-approval',      icon: UserCheck  },
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
@@ -32,7 +30,6 @@ export default function AdminLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
-  const [pendingRiderApprovals, setPendingRiderApprovals] = useState(0);
 
   // Live pending restaurant count for badge
   useEffect(() => {
@@ -44,44 +41,6 @@ export default function AdminLayout() {
     return () => unsub();
   }, []);
 
-  // Live pending rider count for badge (riders + users with role='rider')
-  useEffect(() => {
-    let ridersSnap = new Map<string, boolean>();
-    let usersSnap = new Map<string, boolean>();
-
-    const merge = () => {
-      const combined = new Map([...ridersSnap, ...usersSnap]);
-      const count = [...combined.values()].filter(v => v).length;
-      setPendingRiderApprovals(count);
-    };
-
-    const qRiders = query(collection(db, 'riders'), where('approved', '==', false));
-    const unsubRiders = onSnapshot(qRiders, snap => {
-      ridersSnap = new Map(
-        snap.docs
-          .filter(d => d.data().status !== 'rejected')
-          .map(d => [d.id, true])
-      );
-      merge();
-    }, () => {});
-
-    const qUsers = query(
-      collection(db, 'users'),
-      where('role', '==', 'rider'),
-      where('approved', '==', false),
-    );
-    const unsubUsers = onSnapshot(qUsers, snap => {
-      usersSnap = new Map(
-        snap.docs
-          .filter(d => d.data().status !== 'rejected')
-          .filter(d => !ridersSnap.has(d.id))
-          .map(d => [d.id, true])
-      );
-      merge();
-    }, () => {});
-
-    return () => { unsubRiders(); unsubUsers(); };
-  }, []);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -169,19 +128,7 @@ export default function AdminLayout() {
                     {pendingApprovals > 99 ? '99+' : pendingApprovals}
                   </motion.span>
                 )}
-                {/* Pending rider approvals badge */}
-                {item.path === '/admin/riders-approval' && pendingRiderApprovals > 0 && (
-                  <motion.span
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1"
-                  >
-                    {pendingRiderApprovals > 99 ? '99+' : pendingRiderApprovals}
-                  </motion.span>
-                )}
-                {isActive &&
-                  !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0) &&
-                  !(item.path === '/admin/riders-approval' && pendingRiderApprovals > 0) && (
+                {isActive && !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0) && (
                   <span className="w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0" />
                 )}
               </Link>

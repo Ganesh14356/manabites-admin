@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
-  collection, query, where, onSnapshot, doc,
+  collection, query, where, onSnapshot, doc, getDocs,
   updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
@@ -549,8 +549,31 @@ export default function RiderApproval() {
       setShowPass(false);
       setShowCredModal(true);
       toast.success('Login account created!', { duration: 3000 });
-    } catch (err) {
-      toast.error(getFirebaseError(err));
+    } catch (err: any) {
+      if (err?.code === 'auth/email-already-in-use') {
+        // Email already in Firebase Auth — check if there's already a users doc for this rider
+        try {
+          const existing = await getDocs(
+            query(collection(db, 'users'), where('email', '==', r.email), where('role', '==', 'rider'))
+          );
+          if (!existing.empty) {
+            const existingUid = existing.docs[0].id;
+            const ph = String(r.phone || '').replace(/^\+91/, '').trim();
+            if (ph) {
+              await setDoc(doc(db, 'riders', ph), {
+                authUid: existingUid, loginCreated: true, updatedAt: serverTimestamp(),
+              }, { merge: true });
+            }
+            toast.success('Linked to existing rider account!', { duration: 3000 });
+          } else {
+            toast.error('This email is already used by another account. Please use a different email for this rider.');
+          }
+        } catch {
+          toast.error('This email already has a login account. Use a different email.');
+        }
+      } else {
+        toast.error(getFirebaseError(err));
+      }
     } finally {
       setCreatingAccountId(null);
     }

@@ -62,6 +62,7 @@ interface RiderDoc {
   bankDocUrl?: string;
   bankApproved?: boolean;
   createdAt: Timestamp;
+  _fromRidersCollection?: boolean; // rider approved in approval flow, no auth account yet
 }
 
 interface RiderLocation {
@@ -168,16 +169,58 @@ export default function RiderManagement() {
   // ── Listeners ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const q = query(collection(db, 'users'), where('role', '==', 'rider'));
-    const unsub = onSnapshot(q, snap => {
+    let usersData: RiderDoc[] = [];
+    let approvedRidersData: RiderDoc[] = [];
+
+    const merge = () => {
+      const usersEmails = new Set(usersData.map(r => r.email?.toLowerCase()).filter(Boolean));
+      const fromApproval = approvedRidersData.filter(
+        r => !r.email || !usersEmails.has(r.email.toLowerCase())
+      );
       setRiders(
-        snap.docs
-          .map(d => ({ uid: d.id, ...d.data() } as RiderDoc))
-          .sort((a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0))
+        [...usersData, ...fromApproval].sort(
+          (a, b) => (b.createdAt?.toMillis() ?? 0) - (a.createdAt?.toMillis() ?? 0)
+        )
       );
       setLoading(false);
-    }, err => { toast.error('Failed to load riders: ' + err.message); setLoading(false); });
-    return () => unsub();
+    };
+
+    const unsubUsers = onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'rider')),
+      snap => {
+        usersData = snap.docs.map(d => ({ uid: d.id, ...d.data() } as RiderDoc));
+        merge();
+      },
+      err => { toast.error('Failed to load riders: ' + err.message); setLoading(false); }
+    );
+
+    // Also show riders approved in the approval flow that don't yet have a login account
+    const unsubRiders = onSnapshot(
+      query(collection(db, 'riders'), where('approved', '==', true)),
+      snap => {
+        approvedRidersData = snap.docs
+          .filter(d => !d.data().loginCreated)
+          .map(d => {
+            const data = d.data();
+            return {
+              uid: d.id,
+              name: data.name || '',
+              email: data.email || '',
+              phone: data.phone || d.id,
+              role: 'rider' as const,
+              isActive: data.isActive ?? true,
+              vehicleType: data.vehicleType,
+              vehicleNumber: data.vehicleNumber,
+              createdAt: data.createdAt,
+              _fromRidersCollection: true,
+            } as RiderDoc;
+          });
+        merge();
+      },
+      () => {}
+    );
+
+    return () => { unsubUsers(); unsubRiders(); };
   }, []);
 
   useEffect(() => {
@@ -301,7 +344,10 @@ export default function RiderManagement() {
 
   const handleToggleStatus = async (rider: RiderDoc) => {
     try {
-      await updateDoc(doc(db, 'users', rider.uid), { isActive: !rider.isActive });
+      const ref = rider._fromRidersCollection
+        ? doc(db, 'riders', rider.uid)
+        : doc(db, 'users', rider.uid);
+      await updateDoc(ref, { isActive: !rider.isActive });
       toast.success(`Rider ${!rider.isActive ? 'activated' : 'suspended'}`);
     } catch { toast.error('Failed to update status'); }
   };
@@ -324,10 +370,15 @@ export default function RiderManagement() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteDoc(doc(db, 'users', deleteTarget.uid));
-      const ph = String(deleteTarget.phone || '').replace(/^\+91/, '').trim();
-      if (ph) {
-        try { await deleteDoc(doc(db, 'riders', ph)); } catch { /* ignore if not found */ }
+      if (deleteTarget._fromRidersCollection) {
+        const ph = String(deleteTarget.phone || deleteTarget.uid || '').replace(/^\+91/, '').trim();
+        if (ph) await deleteDoc(doc(db, 'riders', ph));
+      } else {
+        await deleteDoc(doc(db, 'users', deleteTarget.uid));
+        const ph = String(deleteTarget.phone || '').replace(/^\+91/, '').trim();
+        if (ph) {
+          try { await deleteDoc(doc(db, 'riders', ph)); } catch { /* ignore if not found */ }
+        }
       }
       toast.success(`${deleteTarget.name} deleted`);
       setDeleteTarget(null);
@@ -519,25 +570,38 @@ export default function RiderManagement() {
                           </td>
                           <td className="table-cell text-gray-400 text-xs">{formatDate(r.createdAt)}</td>
                           <td className="table-cell">
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => openEditModal(r)} className="w-8 h-8 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center hover:bg-blue-100" title="Edit">
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => handleResetPassword(r)} className="w-8 h-8 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center hover:bg-yellow-100" title="Reset Password">
-                                <Key className="w-3.5 h-3.5" />
-                              </button>
-                              <button onClick={() => { setTab('earnings'); loadEarnings(r); }} className="w-8 h-8 bg-green-50 text-green-600 rounded-lg flex items-center justify-center hover:bg-green-100" title="View Earnings">
-                                <DollarSign className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleToggleStatus(r)}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${r.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
-                              >
-                                {r.isActive ? <><ToggleRight className="w-3.5 h-3.5" /> Suspend</> : <><ToggleLeft className="w-3.5 h-3.5" /> Activate</>}
-                              </button>
-                              <button onClick={() => setDeleteTarget(r)} className="w-8 h-8 bg-red-50 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-100" title="Delete Rider">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {r._fromRidersCollection ? (
+                                <>
+                                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">
+                                    Go to Rider Approvals → Login
+                                  </span>
+                                  <button onClick={() => setDeleteTarget(r)} className="w-8 h-8 bg-red-50 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-100" title="Delete Rider">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => openEditModal(r)} className="w-8 h-8 bg-blue-50 text-blue-500 rounded-lg flex items-center justify-center hover:bg-blue-100" title="Edit">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => handleResetPassword(r)} className="w-8 h-8 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center hover:bg-yellow-100" title="Reset Password">
+                                    <Key className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button onClick={() => { setTab('earnings'); loadEarnings(r); }} className="w-8 h-8 bg-green-50 text-green-600 rounded-lg flex items-center justify-center hover:bg-green-100" title="View Earnings">
+                                    <DollarSign className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleStatus(r)}
+                                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${r.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+                                  >
+                                    {r.isActive ? <><ToggleRight className="w-3.5 h-3.5" /> Suspend</> : <><ToggleLeft className="w-3.5 h-3.5" /> Activate</>}
+                                  </button>
+                                  <button onClick={() => setDeleteTarget(r)} className="w-8 h-8 bg-red-50 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-100" title="Delete Rider">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         </motion.tr>
