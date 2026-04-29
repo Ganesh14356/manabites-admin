@@ -221,7 +221,11 @@ export default function RestaurantApproval() {
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16 space-y-6">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div>
+      <motion.div
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
           <ShieldCheck className="w-7 h-7 text-brand" />
           Restaurant Approvals
@@ -229,7 +233,7 @@ export default function RestaurantApproval() {
         <p className="text-gray-400 text-sm mt-0.5">
           Review and manage restaurant onboarding requests
         </p>
-      </div>
+      </motion.div>
 
       {/* ── Stat Cards ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -244,6 +248,7 @@ export default function RestaurantApproval() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06 }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
             whileTap={{ scale: 0.97 }}
             onClick={() => setStatusFilter(s.key)}
             className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color} text-left transition-all ${statusFilter === s.key ? 'ring-2 ring-offset-2 ring-brand' : ''}`}

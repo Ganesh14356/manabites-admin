@@ -130,15 +130,25 @@ export default function Payouts() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800">Payouts</h1>
           <p className="text-gray-400 text-sm mt-0.5">Manage restaurant and rider settlements</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary w-auto px-5">
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={() => setShowCreate(true)}
+          className="btn-primary w-auto px-5"
+        >
           <Plus className="w-4 h-4" /> Create Payout
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -147,15 +157,22 @@ export default function Payouts() {
           { label: 'Paid Out', value: '', sub: `₹${summary.totalPaid.toLocaleString('en-IN')}`, icon: CheckCircle, color: 'border-green-500', iconBg: 'bg-green-50', iconColor: 'text-green-600' },
           { label: 'Restaurant Due', value: '', sub: `₹${summary.restaurantPending.toLocaleString('en-IN')}`, icon: Store, color: 'border-orange-400', iconBg: 'bg-orange-50', iconColor: 'text-brand' },
           { label: 'Rider Due', value: '', sub: `₹${summary.riderPending.toLocaleString('en-IN')}`, icon: Bike, color: 'border-blue-400', iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
-        ].map(s => (
-          <div key={s.label} className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color}`}>
+        ].map((s, i) => (
+          <motion.div
+            key={s.label}
+            className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color}`}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: i * 0.08, duration: 0.35, ease: 'easeOut' }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
+          >
             <div className={`w-9 h-9 ${s.iconBg} rounded-xl flex items-center justify-center mb-3`}>
               <s.icon className={`w-5 h-5 ${s.iconColor}`} />
             </div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{s.label}</p>
             {s.value !== '' && <p className="text-2xl font-black text-gray-800 mt-0.5">{s.value}</p>}
             <p className={`${s.value ? 'text-sm text-gray-500' : 'text-2xl font-black text-gray-800 mt-0.5'}`}>{s.sub}</p>
-          </div>
+          </motion.div>
         ))}
       </div>
 
@@ -198,7 +215,7 @@ export default function Payouts() {
               <tbody>
                 <AnimatePresence>
                   {filtered.map(p => (
-                    <motion.tr key={p.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="border-b border-gray-50 hover:bg-gray-50">
+                    <motion.tr key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="table-cell font-semibold text-gray-800">{p.entityName}</td>
                       <td className="table-cell">
                         <span className={`badge ${p.entityType === 'restaurant' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>

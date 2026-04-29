@@ -135,15 +135,25 @@ export default function PromoCodes() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+      <motion.div
+        className="flex items-center justify-between mb-8"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800">Promo Codes</h1>
           <p className="text-gray-500 text-sm mt-1">Manage discounts and offers</p>
         </div>
-        <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+        <motion.button
+          whileHover={{ scale: 1.03 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={openAdd}
+          className="btn-primary flex items-center gap-2"
+        >
           <Plus className="w-4 h-4" /> Add Promo Code
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -151,11 +161,13 @@ export default function PromoCodes() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {promos.map(promo => (
+          {promos.map((promo, i) => (
             <motion.div
               key={promo.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
+              initial={{ opacity: 0, y: 16, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ delay: i * 0.06, duration: 0.3 }}
+              whileHover={{ y: -4, boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
               className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${promo.isActive ? 'border-green-500' : 'border-gray-300'}`}
             >
               <div className="flex justify-between items-start mb-4">

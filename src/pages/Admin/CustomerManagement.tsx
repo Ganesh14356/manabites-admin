@@ -62,7 +62,7 @@ const statusColor: Record<string, string> = {
 
 // ── CSV Download ──────────────────────────────────────────────────────────────
 
-function downloadCSV(rows: string[][], filename: string) {
+function downloadCSV(rows: (string | number)[][], filename: string) {
   const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
@@ -196,7 +196,12 @@ export default function CustomerManagement() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800">Customer Management</h1>
           <p className="text-gray-400 text-sm mt-0.5">All registered users</p>
@@ -208,7 +213,7 @@ export default function CustomerManagement() {
         >
           <Download className="w-4 h-4" /> Download List
         </motion.button>
-      </div>
+      </motion.div>
 
       {/* Stat Cards with green animation */}
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -222,6 +227,7 @@ export default function CustomerManagement() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.08 }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
             className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color} relative overflow-hidden`}
           >
             {/* green pulse background */}
@@ -291,10 +297,10 @@ export default function CustomerManagement() {
                     {filtered.map((c, i) => (
                       <motion.tr
                         key={c.uid}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
+                        initial={{ opacity: 0, x: -10, y: 6 }}
+                        animate={{ opacity: 1, x: 0, y: 0 }}
                         exit={{ opacity: 0 }}
-                        transition={{ delay: i * 0.02 }}
+                        transition={{ delay: i * 0.02, duration: 0.22 }}
                         onClick={() => loadOrders(c)}
                         className={`border-b border-gray-50 cursor-pointer transition-colors ${
                           selectedCustomer?.uid === c.uid

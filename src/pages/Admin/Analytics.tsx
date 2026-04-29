@@ -287,7 +287,12 @@ export default function Analytics() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16 space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <motion.div
+        className="flex items-start justify-between"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800">Analytics & Reports</h1>
           <p className="text-gray-400 text-sm mt-0.5">Platform performance overview</p>
@@ -344,17 +349,18 @@ export default function Analytics() {
             </AnimatePresence>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {statCards.map((card, i) => (
           <motion.div
             key={card.label}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
-            className="bg-white p-5 rounded-2xl shadow-card"
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: i * 0.07, duration: 0.35, ease: 'easeOut' }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
+            className="bg-white p-5 rounded-2xl shadow-card cursor-default"
           >
             <div className={`w-9 h-9 ${card.bg} rounded-xl flex items-center justify-center mb-3`}>
               <card.icon className={`w-5 h-5 ${card.iconColor}`} />
@@ -369,7 +375,12 @@ export default function Analytics() {
       </div>
 
       {/* Sales Chart + Period Toggle */}
-      <div className="bg-white p-6 rounded-2xl shadow-card">
+      <motion.div
+        className="bg-white p-6 rounded-2xl shadow-card"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.45, duration: 0.35 }}
+      >
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold text-gray-800">Sales Trend</h3>
           <div className="flex bg-gray-100 p-1 rounded-xl gap-1">
@@ -404,12 +415,17 @@ export default function Analytics() {
             </AreaChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </motion.div>
 
       {/* Revenue Breakdown + Orders Bar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Revenue Pie */}
-        <div className="bg-white p-6 rounded-2xl shadow-card">
+        <motion.div
+          className="bg-white p-6 rounded-2xl shadow-card"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.55, duration: 0.35 }}
+        >
           <h3 className="text-lg font-bold text-gray-800 mb-5">Revenue Breakdown</h3>
           {revenueBreakdown.length > 0 ? (
             <div className="flex items-center gap-6">
@@ -449,10 +465,15 @@ export default function Analytics() {
           ) : (
             <div className="flex items-center justify-center h-56 text-gray-400 text-sm">No revenue data yet</div>
           )}
-        </div>
+        </motion.div>
 
         {/* Orders Bar */}
-        <div className="bg-white p-6 rounded-2xl shadow-card">
+        <motion.div
+          className="bg-white p-6 rounded-2xl shadow-card"
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.6, duration: 0.35 }}
+        >
           <h3 className="text-lg font-bold text-gray-800 mb-5">Order Volumes</h3>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -465,13 +486,18 @@ export default function Analytics() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </motion.div>
       </div>
 
       {/* Leaderboards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top Restaurants */}
-        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+        <motion.div
+          className="bg-white rounded-2xl shadow-card overflow-hidden"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.65, duration: 0.35 }}
+        >
           <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
             <Award className="w-5 h-5 text-orange-400" />
             <h3 className="text-base font-bold text-gray-800">Top Restaurants</h3>
@@ -482,7 +508,13 @@ export default function Analytics() {
           ) : (
             <div className="divide-y divide-gray-50">
               {topRestaurants.map((r, i) => (
-                <div key={r.id} className="flex items-center gap-4 px-6 py-3">
+                <motion.div
+                  key={r.id}
+                  className="flex items-center gap-4 px-6 py-3"
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.7 + i * 0.06, duration: 0.28 }}
+                >
                   <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-500'}`}>
                     {i + 1}
                   </span>
@@ -494,14 +526,19 @@ export default function Analytics() {
                     <p className="font-black text-gray-800 text-sm">₹{r.earnings.toLocaleString('en-IN')}</p>
                     <p className="text-xs text-gray-400">earned</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* Top Riders */}
-        <div className="bg-white rounded-2xl shadow-card overflow-hidden">
+        <motion.div
+          className="bg-white rounded-2xl shadow-card overflow-hidden"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.7, duration: 0.35 }}
+        >
           <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
             <Bike className="w-5 h-5 text-blue-400" />
             <h3 className="text-base font-bold text-gray-800">Top Riders</h3>
@@ -512,7 +549,13 @@ export default function Analytics() {
           ) : (
             <div className="divide-y divide-gray-50">
               {topRiders.map((r, i) => (
-                <div key={r.uid} className="flex items-center gap-4 px-6 py-3">
+                <motion.div
+                  key={r.uid}
+                  className="flex items-center gap-4 px-6 py-3"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.75 + i * 0.06, duration: 0.28 }}
+                >
                   <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-600' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-500'}`}>
                     {i + 1}
                   </span>
@@ -524,11 +567,11 @@ export default function Analytics() {
                     <p className="font-black text-gray-800 text-sm">₹{r.earnings.toLocaleString('en-IN')}</p>
                     <p className="text-xs text-gray-400">earned</p>
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       </div>
     </div>
   );

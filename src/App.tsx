@@ -13,6 +13,7 @@ import OrderManagement from './pages/Admin/OrderManagement';
 import Analytics from './pages/Admin/Analytics';
 import Payouts from './pages/Admin/Payouts';
 import PromoCodes from './pages/Admin/PromoCodes';
+import Banners from './pages/Admin/Banners';
 import RestaurantApproval from './pages/Admin/RestaurantApproval';
 import RiderApproval from './pages/Admin/RiderApproval';
 import RazorpayPayments from './pages/Admin/RazorpayPayments';
@@ -50,6 +51,7 @@ export default function App() {
                 <Route path="customers" element={<CustomerManagement />} />
                 <Route path="payouts" element={<Payouts />} />
                 <Route path="promocodes" element={<PromoCodes />} />
+                <Route path="banners" element={<Banners />} />
                 <Route path="restaurants-approval" element={<RestaurantApproval />} />
                 <Route path="riders-approval" element={<RiderApproval />} />
                 <Route path="razorpay" element={<RazorpayPayments />} />

@@ -10,12 +10,12 @@ import {
   signOut,
 } from 'firebase/auth';
 import {
-  collection, doc, setDoc, updateDoc, query, where,
+  collection, doc, setDoc, updateDoc, deleteDoc, query, where,
   onSnapshot, orderBy, getDocs, Timestamp, serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
 import {
-  Plus, Edit2, Key, ToggleLeft, ToggleRight, Search, Copy,
+  Plus, Edit2, Key, ToggleLeft, ToggleRight, Search, Copy, Trash2,
   AlertTriangle, X, Check, Eye, EyeOff, Bike,
   Map as MapIcon, List, DollarSign, FileCheck, FileX, ShoppingBag,
   TrendingUp,
@@ -147,6 +147,10 @@ export default function RiderManagement() {
   const [showPass, setShowPass] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<RiderDoc | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // Map state
   const [riderLocations, setRiderLocations] = useState<RiderLocation[]>([]);
 
@@ -274,6 +278,16 @@ export default function RiderManagement() {
           licenseApproved: false, bankApproved: false,
           createdAt: serverTimestamp(),
         });
+        // Mirror to riders/{phone} so rider app can find this doc on phone login
+        await setDoc(doc(db, 'riders', data.phone), {
+          name: data.name, phone: data.phone, email: data.email,
+          vehicleType: data.vehicleType, vehicleNumber: data.vehicleNumber,
+          licenseNumber: data.licenseNumber || null,
+          approvalStatus: 'pending', approved: false,
+          status: 'offline', isOnline: false, activeOrderId: null,
+          totalDeliveries: 0, totalEarnings: 0, todayEarnings: 0, weeklyEarnings: 0,
+          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+        }, { merge: true });
         closeModal();
         setGeneratedPass({ password, email: data.email, name: data.name });
         setShowPasswordModal(true);
@@ -306,6 +320,24 @@ export default function RiderManagement() {
     } catch (err) { toast.error(getFirebaseError(err)); }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteDoc(doc(db, 'users', deleteTarget.uid));
+      const ph = String(deleteTarget.phone || '').replace(/^\+91/, '').trim();
+      if (ph) {
+        try { await deleteDoc(doc(db, 'riders', ph)); } catch { /* ignore if not found */ }
+      }
+      toast.success(`${deleteTarget.name} deleted`);
+      setDeleteTarget(null);
+    } catch (err: any) {
+      toast.error('Delete failed: ' + err.message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const openEditModal = (r: RiderDoc) => {
     setEditTarget(r);
     reset({
@@ -336,17 +368,22 @@ export default function RiderManagement() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800">Rider Management</h1>
           <p className="text-gray-400 text-sm mt-0.5">Manage delivery partners</p>
         </div>
         {tab === 'list' && (
-          <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowAddModal(true)} className="btn-primary w-auto px-5">
+          <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowAddModal(true)} className="btn-primary w-auto px-5">
             <Plus className="w-5 h-5" /> Add Rider
           </motion.button>
         )}
-      </div>
+      </motion.div>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -355,11 +392,18 @@ export default function RiderManagement() {
           { label: 'Active', value: stats.active, color: 'border-green-500' },
           { label: 'Inactive', value: stats.inactive, color: 'border-red-400' },
           { label: 'Docs Pending', value: stats.pendingDocs, color: 'border-yellow-400' },
-        ].map(s => (
-          <div key={s.label} className={`bg-white rounded-2xl shadow-card p-4 border-l-4 ${s.color}`}>
+        ].map((s, i) => (
+          <motion.div
+            key={s.label}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: i * 0.08, duration: 0.35, ease: 'easeOut' }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
+            className={`bg-white rounded-2xl shadow-card p-4 border-l-4 ${s.color}`}
+          >
             <p className="text-2xl font-black text-gray-800">{s.value}</p>
             <p className="text-xs text-gray-400 mt-0.5">{s.label}</p>
-          </div>
+          </motion.div>
         ))}
       </div>
 
@@ -490,6 +534,9 @@ export default function RiderManagement() {
                                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 ${r.isActive ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
                               >
                                 {r.isActive ? <><ToggleRight className="w-3.5 h-3.5" /> Suspend</> : <><ToggleLeft className="w-3.5 h-3.5" /> Activate</>}
+                              </button>
+                              <button onClick={() => setDeleteTarget(r)} className="w-8 h-8 bg-red-50 text-red-500 rounded-lg flex items-center justify-center hover:bg-red-100" title="Delete Rider">
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
                           </td>
@@ -741,6 +788,59 @@ export default function RiderManagement() {
                   {isSubmitting ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : editTarget ? 'Save Changes' : 'Add Rider'}
                 </motion.button>
               </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete Confirm Modal ──────────────────────────────────────────── */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
+              onClick={() => !deleting && setDeleteTarget(null)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-sm mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="h-1.5 bg-gradient-to-r from-red-500 to-rose-400" />
+              <div className="p-6">
+                <div className="flex items-start gap-4 mb-5">
+                  <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center flex-shrink-0">
+                    <Trash2 className="w-6 h-6 text-red-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-black text-gray-800">Delete Rider</h2>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Permanently delete <span className="font-bold text-gray-700">"{deleteTarget.name}"</span>? This cannot be undone.
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-5 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-700 font-medium">
+                    All rider data will be permanently removed. Their Firebase Auth account will remain — delete it separately from the Firebase console if needed.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setDeleteTarget(null)} disabled={deleting}
+                    className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <motion.button whileTap={{ scale: 0.97 }} onClick={handleDelete} disabled={deleting}
+                    className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+                    {deleting
+                      ? <><motion.span animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: 'linear' }}
+                          className="w-4 h-4 border-2 border-white border-t-transparent rounded-full block" /> Deleting...</>
+                      : <><Trash2 className="w-4 h-4" /> Delete</>
+                    }
+                  </motion.button>
+                </div>
+              </div>
             </motion.div>
           </>
         )}

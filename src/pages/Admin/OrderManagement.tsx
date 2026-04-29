@@ -2,12 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  collection, doc, updateDoc,
-  onSnapshot, query, orderBy, Timestamp
+  collection, doc, updateDoc, getDocs,
+  onSnapshot, query, orderBy, where, Timestamp
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
-  Search, Filter, Eye, XCircle, UserPlus, Clock, MapPin, CheckCircle, AlertTriangle
+  Search, Eye, XCircle, UserPlus, MapPin, CheckCircle,
+  AlertTriangle, Bike, ChevronDown, X
 } from 'lucide-react';
 
 interface OrderDoc {
@@ -28,6 +29,13 @@ interface OrderDoc {
   createdAt: Timestamp;
 }
 
+interface RiderOption {
+  uid: string;
+  name: string;
+  phone: string;
+  vehicleType?: string;
+}
+
 function formatDate(timestamp: any): string {
   if (!timestamp) return '—';
   const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -44,6 +52,12 @@ export default function OrderManagement() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<OrderDoc | null>(null);
 
+  // Rider assignment state
+  const [riders, setRiders] = useState<RiderOption[]>([]);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assigningRider, setAssigningRider] = useState(false);
+  const [selectedRiderId, setSelectedRiderId] = useState('');
+
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snapshot => {
@@ -55,6 +69,40 @@ export default function OrderManagement() {
     });
     return () => unsub();
   }, []);
+
+  // Fetch active riders once
+  useEffect(() => {
+    getDocs(query(collection(db, 'users'), where('role', '==', 'rider'))).then(snap => {
+      setRiders(
+        snap.docs
+          .map(d => ({ uid: d.id, name: d.data().name || '—', phone: d.data().phone || '', vehicleType: d.data().vehicleType }))
+          .filter(r => r.name !== '—')
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    });
+  }, []);
+
+  const handleAssignRider = async () => {
+    if (!selectedOrder || !selectedRiderId) return;
+    const rider = riders.find(r => r.uid === selectedRiderId);
+    if (!rider) return;
+    setAssigningRider(true);
+    try {
+      await updateDoc(doc(db, 'orders', selectedOrder.id), {
+        riderId: rider.uid,
+        riderName: rider.name,
+      });
+      // Keep the panel open — the live listener will update selectedOrder via orders state
+      setSelectedOrder(prev => prev ? { ...prev, riderId: rider.uid, riderName: rider.name } : prev);
+      toast.success(`Rider "${rider.name}" assigned successfully`);
+      setShowAssignModal(false);
+      setSelectedRiderId('');
+    } catch {
+      toast.error('Failed to assign rider');
+    } finally {
+      setAssigningRider(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
@@ -91,14 +139,19 @@ export default function OrderManagement() {
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
             📦 Order Management
           </h1>
           <p className="text-gray-400 text-sm mt-0.5">Monitor live and past orders</p>
         </div>
-      </div>
+      </motion.div>
 
       <div className="flex gap-3 mb-5">
         <div className="relative flex-1">
@@ -126,7 +179,17 @@ export default function OrderManagement() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading orders...</div>
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <motion.div
+              key={i}
+              className="h-14 bg-gray-100 rounded-xl animate-pulse"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: i * 0.05 }}
+            />
+          ))}
+        </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-card overflow-hidden">
           <div className="overflow-x-auto">
@@ -147,9 +210,10 @@ export default function OrderManagement() {
                   {filtered.map(o => (
                     <motion.tr
                       key={o.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0 }}
+                      transition={{ duration: 0.2 }}
                       className="border-b border-gray-50 hover:bg-gray-50"
                     >
                       <td className="table-cell font-mono text-xs text-gray-500">
@@ -244,13 +308,24 @@ export default function OrderManagement() {
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                      <UserPlus className="w-4 h-4 text-green-600" />
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${selectedOrder.riderId ? 'bg-green-100' : 'bg-yellow-100'}`}>
+                      <Bike className={`w-4 h-4 ${selectedOrder.riderId ? 'text-green-600' : 'text-yellow-600'}`} />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <p className="text-sm font-bold text-gray-800">{selectedOrder.riderName || 'Not Assigned'}</p>
                       <p className="text-xs text-gray-500">Delivery Partner</p>
                     </div>
+                    {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
+                      <motion.button
+                        whileTap={{ scale: 0.96 }}
+                        whileHover={{ scale: 1.03 }}
+                        onClick={() => { setShowAssignModal(true); setSelectedRiderId(selectedOrder.riderId || ''); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-brand text-white text-xs font-bold rounded-lg hover:bg-orange-600 transition-colors"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        {selectedOrder.riderId ? 'Reassign' : 'Assign'}
+                      </motion.button>
+                    )}
                   </div>
                 </div>
 
@@ -298,6 +373,126 @@ export default function OrderManagement() {
                     <AlertTriangle className="w-4 h-4" /> Cancel Order
                   </button>
                 )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* ── Assign Rider Modal ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showAssignModal && selectedOrder && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-[60]"
+              onClick={() => setShowAssignModal(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[70] max-w-sm mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center">
+                    <Bike className="w-4 h-4 text-brand" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-gray-800">Assign Rider</h3>
+                    <p className="text-[11px] text-gray-400 font-mono">Order #{selectedOrder.id.slice(0, 8).toUpperCase()}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAssignModal(false)}
+                  className="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200"
+                >
+                  <X className="w-3.5 h-3.5 text-gray-500" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Current assignment info */}
+                {selectedOrder.riderId && (
+                  <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm">
+                    <Bike className="w-4 h-4 text-brand flex-shrink-0" />
+                    <span className="text-gray-600">Currently: <span className="font-bold text-gray-800">{selectedOrder.riderName}</span></span>
+                  </div>
+                )}
+
+                {/* Rider dropdown */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Select Rider
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedRiderId}
+                      onChange={e => setSelectedRiderId(e.target.value)}
+                      className="input-field appearance-none pr-9"
+                    >
+                      <option value="">— Choose a rider —</option>
+                      {riders.map(r => (
+                        <option key={r.uid} value={r.uid}>
+                          {r.name}{r.vehicleType ? ` · ${r.vehicleType}` : ''}{r.phone ? ` · ${r.phone}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+                  </div>
+                  {riders.length === 0 && (
+                    <p className="text-xs text-gray-400 mt-1.5">No riders found in the system.</p>
+                  )}
+                </div>
+
+                {/* Selected rider preview */}
+                <AnimatePresence>
+                  {selectedRiderId && (() => {
+                    const r = riders.find(x => x.uid === selectedRiderId);
+                    return r ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0 }}
+                        className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 flex items-center gap-3"
+                      >
+                        <div className="w-9 h-9 rounded-full bg-green-200 flex items-center justify-center font-black text-green-700 text-sm flex-shrink-0">
+                          {r.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-800">{r.name}</p>
+                          <p className="text-xs text-gray-500">{r.phone}{r.vehicleType ? ` · ${r.vehicleType}` : ''}</p>
+                        </div>
+                      </motion.div>
+                    ) : null;
+                  })()}
+                </AnimatePresence>
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 pb-5 flex gap-3">
+                <button
+                  onClick={() => setShowAssignModal(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 text-sm"
+                >
+                  Cancel
+                </button>
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleAssignRider}
+                  disabled={!selectedRiderId || assigningRider}
+                  className="flex-1 py-2.5 bg-brand text-white font-bold rounded-xl hover:bg-orange-600 disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                >
+                  {assigningRider ? (
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  {assigningRider ? 'Assigning...' : 'Assign Rider'}
+                </motion.button>
               </div>
             </motion.div>
           </>

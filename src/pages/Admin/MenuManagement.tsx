@@ -164,7 +164,12 @@ export default function MenuManagement() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
       {/* Header */}
-      <div className="mb-6">
+      <motion.div
+        className="mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <Link to="/admin/restaurants" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-brand mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back to Restaurants
         </Link>
@@ -185,7 +190,7 @@ export default function MenuManagement() {
             <Plus className="w-5 h-5" /> Add Item
           </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Search */}
       <div className="relative mb-6 max-w-md">
@@ -210,12 +215,14 @@ export default function MenuManagement() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <AnimatePresence>
-            {filteredItems.map(item => (
+            {filteredItems.map((item, i) => (
               <motion.div
                 key={item.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
+                initial={{ opacity: 0, scale: 0.93, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ delay: i * 0.05, duration: 0.28 }}
+                whileHover={{ y: -4, boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
                 className={`bg-white rounded-2xl shadow-card p-4 border-2 transition-colors ${
                   item.isAvailable ? 'border-transparent' : 'border-gray-200 opacity-75'
                 }`}

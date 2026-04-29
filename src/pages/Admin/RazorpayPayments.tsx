@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactElement } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
@@ -19,7 +19,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed:     'bg-red-100 text-red-700',
 };
 
-const METHOD_ICONS: Record<string, JSX.Element> = {
+const METHOD_ICONS: Record<string, ReactElement> = {
   upi:       <Smartphone className="w-3.5 h-3.5" />,
   netbanking:<Landmark className="w-3.5 h-3.5" />,
   wallet:    <Wallet className="w-3.5 h-3.5" />,
@@ -324,7 +324,12 @@ export default function RazorpayPayments() {
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
             <span className="w-8 h-8 bg-[#3395FF] rounded-xl flex items-center justify-center">
@@ -350,7 +355,7 @@ export default function RazorpayPayments() {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Setup notice */}
       {needsSetup && (
@@ -414,15 +419,22 @@ export default function RazorpayPayments() {
               iconBg: 'bg-purple-50',
               iconColor: 'text-purple-600',
             },
-          ].map(s => (
-            <div key={s.label} className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color}`}>
+          ].map((s, i) => (
+            <motion.div
+              key={s.label}
+              className={`bg-white rounded-2xl shadow-card p-5 border-l-4 ${s.color}`}
+              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ delay: i * 0.08, duration: 0.35, ease: 'easeOut' }}
+              whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
+            >
               <div className={`w-9 h-9 ${s.iconBg} rounded-xl flex items-center justify-center mb-3`}>
                 <s.icon className={`w-5 h-5 ${s.iconColor}`} />
               </div>
               <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">{s.label}</p>
               <p className="text-xl font-black text-gray-800 mt-0.5">{s.value}</p>
               <p className="text-xs text-gray-400 mt-0.5">{s.sub}</p>
-            </div>
+            </motion.div>
           ))}
         </div>
       )}
@@ -496,9 +508,10 @@ export default function RazorpayPayments() {
                     {paginated.map(p => (
                       <motion.tr
                         key={p.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
                         className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer"
                         onClick={() => setSelected(p)}
                       >

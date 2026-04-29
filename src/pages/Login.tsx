@@ -16,21 +16,46 @@ export default function Login() {
   const [error, setError] = useState('');
 
   const verifyAdmin = async (uid: string, email: string | null) => {
+    const ADMIN_PHONE = '6300752250';
+
     // Check admins collection first
     const adminSnap = await getDoc(doc(db, 'admins', uid));
-    if (adminSnap.exists()) return true;
-    // Check users collection for role
-    const userSnap = await getDoc(doc(db, 'users', uid));
-    if (userSnap.exists() && userSnap.data().role === 'admin') return true;
-    // Hardcoded fallback for the primary admin email
-    if (email === 'munjaganesh05@gmail.com') {
-      // Auto-create admin record
+    if (adminSnap.exists()) {
       await setDoc(doc(db, 'admins', uid), {
-        email,
-        createdAt: serverTimestamp(),
+        uid,
+        email: email ?? '',
+        phone: ADMIN_PHONE,
+        lastLoginAt: serverTimestamp(),
       }, { merge: true });
       return true;
     }
+
+    // Check users collection for role
+    const userSnap = await getDoc(doc(db, 'users', uid));
+    if (userSnap.exists() && userSnap.data().role === 'admin') {
+      // Promote to admins collection so future logins are fast-path
+      await setDoc(doc(db, 'admins', uid), {
+        uid,
+        email: email ?? '',
+        phone: ADMIN_PHONE,
+        createdAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+      }, { merge: true });
+      return true;
+    }
+
+    // Hardcoded fallback for the primary admin email
+    if (email === 'munjaganesh05@gmail.com') {
+      await setDoc(doc(db, 'admins', uid), {
+        uid,
+        email,
+        phone: ADMIN_PHONE,
+        createdAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp(),
+      }, { merge: true });
+      return true;
+    }
+
     return false;
   };
 
@@ -85,24 +110,60 @@ export default function Login() {
     }
   };
 
+  const floatingItems = ['🍔', '🍕', '🍜', '🌮', '🍣', '🥗'];
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-orange-50 flex items-center justify-center p-4 overflow-hidden relative">
+      {/* Floating background food icons */}
+      {floatingItems.map((emoji, i) => (
+        <motion.span
+          key={i}
+          className="absolute text-3xl select-none pointer-events-none opacity-20"
+          style={{
+            left: `${10 + (i * 15) % 80}%`,
+            top: `${10 + (i * 13) % 70}%`,
+          }}
+          animate={{
+            y: [0, -18, 0],
+            rotate: [0, i % 2 === 0 ? 10 : -10, 0],
+          }}
+          transition={{
+            duration: 3 + i * 0.5,
+            repeat: Infinity,
+            ease: 'easeInOut',
+            delay: i * 0.4,
+          }}
+        >
+          {emoji}
+        </motion.span>
+      ))}
+
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="w-full max-w-md"
+        transition={{ duration: 0.45, ease: 'easeOut' }}
+        className="w-full max-w-md relative z-10"
       >
         {/* Logo */}
-        <div className="text-center mb-8">
+        <motion.div
+          className="text-center mb-8"
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, type: 'spring', stiffness: 200, damping: 15 }}
+        >
           <div className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-orange-200">
             <span className="text-3xl">🍔</span>
           </div>
           <h1 className="text-3xl font-black text-gray-900">Manabites</h1>
           <p className="text-gray-500 text-sm mt-1 font-semibold tracking-widest uppercase">Admin Dashboard</p>
-        </div>
+        </motion.div>
 
-        <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8">
+        <motion.div
+          className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8"
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.15, ease: 'easeOut' }}
+        >
           <h2 className="text-xl font-bold text-gray-800 mb-6">Sign in to continue</h2>
 
           {/* Error Banner */}
@@ -198,7 +259,7 @@ export default function Login() {
             )}
             Sign in with Google
           </button>
-        </div>
+        </motion.div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
           Only authorized admin accounts can access this dashboard.

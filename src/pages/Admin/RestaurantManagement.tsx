@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useForm } from 'react-hook-form';
@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import { LocationPicker } from '../../components/LocationPicker';
 import {
   Plus as FiPlus,
   Edit2 as FiEdit2,
@@ -42,6 +43,8 @@ interface RestaurantDoc {
   email: string;
   phone: string;
   address: string;
+  lat?: number;
+  lng?: number;
   ownerId: string;
   isActive: boolean;
   createdAt: Timestamp;
@@ -300,10 +303,12 @@ function AddRestaurantModal({
   const [loading, setLoading] = useState(false);
   const [showIdentityError, setShowIdentityError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; address: string } | null>(null);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<AddFormData>({
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<AddFormData>({
     resolver: zodResolver(addRestaurantSchema),
   });
+  const watchedAddress = watch('address', '');
 
   const onSubmit = async (data: AddFormData) => {
     setLoading(true);
@@ -323,6 +328,8 @@ function AddRestaurantModal({
         email: data.email,
         phone: data.phone,
         address: data.address,
+        lat: locationCoords?.lat ?? null,
+        lng: locationCoords?.lng ?? null,
         fssai: data.fssai || '',
         bankAccount: data.bankAccount || '',
         openingHours: data.openingHours || '',
@@ -343,6 +350,7 @@ function AddRestaurantModal({
       });
 
       reset();
+      setLocationCoords(null);
       onClose();
       onSuccess(password, data.email, data.name);
     } catch (error: unknown) {
@@ -430,6 +438,21 @@ function AddRestaurantModal({
                 {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address.message}</p>}
               </div>
 
+              <div className="relative">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  Pin Location on Map *
+                </label>
+                <LocationPicker
+                  lat={locationCoords?.lat ?? null}
+                  lng={locationCoords?.lng ?? null}
+                  address={watchedAddress}
+                  onChange={(result) => {
+                    setLocationCoords({ lat: result.lat, lng: result.lng, address: result.address });
+                    setValue('address', result.address);
+                  }}
+                />
+              </div>
+
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
                 <p className="text-xs text-blue-700 leading-relaxed">
                   <strong>ℹ️ Note:</strong> A Firebase Auth account will be created for this restaurant owner.
@@ -469,21 +492,30 @@ function EditRestaurantModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<EditFormData>({
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EditFormData>({
     resolver: zodResolver(editRestaurantSchema),
   });
+  const watchedAddress = watch('address', '');
 
   useEffect(() => {
-    if (restaurant) reset({
-      name: restaurant.name,
-      email: restaurant.email,
-      phone: restaurant.phone,
-      address: restaurant.address,
-      fssai: (restaurant as any).fssai || '',
-      bankAccount: (restaurant as any).bankAccount || '',
-      openingHours: (restaurant as any).openingHours || '',
-    });
+    if (restaurant) {
+      reset({
+        name: restaurant.name,
+        email: restaurant.email,
+        phone: restaurant.phone,
+        address: restaurant.address,
+        fssai: (restaurant as any).fssai || '',
+        bankAccount: (restaurant as any).bankAccount || '',
+        openingHours: (restaurant as any).openingHours || '',
+      });
+      setLocationCoords(
+        restaurant.lat && restaurant.lng
+          ? { lat: restaurant.lat, lng: restaurant.lng }
+          : null
+      );
+    }
   }, [restaurant, reset]);
 
   const onSubmit = async (data: EditFormData) => {
@@ -497,6 +529,8 @@ function EditRestaurantModal({
         phone: data.phone,
         address: data.address,
         email: data.email,
+        lat: locationCoords?.lat ?? null,
+        lng: locationCoords?.lng ?? null,
         fssai: data.fssai || '',
         bankAccount: data.bankAccount || '',
         openingHours: data.openingHours || '',
@@ -591,6 +625,21 @@ function EditRestaurantModal({
                 {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address.message}</p>}
               </div>
 
+              <div className="relative">
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  Pin Location on Map *
+                </label>
+                <LocationPicker
+                  lat={locationCoords?.lat ?? null}
+                  lng={locationCoords?.lng ?? null}
+                  address={watchedAddress}
+                  onChange={(result) => {
+                    setLocationCoords({ lat: result.lat, lng: result.lng });
+                    setValue('address', result.address);
+                  }}
+                />
+              </div>
+
               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3">
                 <p className="text-xs text-yellow-800 leading-relaxed">
                   <strong>Note:</strong> Changing email here only updates the database.
@@ -645,10 +694,10 @@ function RestaurantTable({
               {restaurants.map((r, i) => (
                 <motion.tr
                   key={r.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
+                  initial={{ opacity: 0, x: -10, y: 6 }}
+                  animate={{ opacity: 1, x: 0, y: 0 }}
                   exit={{ opacity: 0, x: 10 }}
-                  transition={{ delay: i * 0.03 }}
+                  transition={{ delay: i * 0.03, duration: 0.22 }}
                   className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
                 >
                   <td className="table-cell font-semibold text-gray-800">
@@ -836,7 +885,12 @@ export default function RestaurantManagement() {
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
-      <div className="flex items-start justify-between mb-6">
+      <motion.div
+        className="flex items-start justify-between mb-6"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
         <div>
           <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
             🏢 Restaurant Management
@@ -847,12 +901,13 @@ export default function RestaurantManagement() {
         </div>
         <motion.button
           whileTap={{ scale: 0.97 }}
+          whileHover={{ scale: 1.03 }}
           onClick={() => setShowAddModal(true)}
           className="btn-primary w-auto px-5"
         >
           <FiPlus className="w-5 h-5" /> Add Restaurant
         </motion.button>
-      </div>
+      </motion.div>
 
       <AnimatePresence>
         {showIdentityBanner && (
@@ -874,6 +929,7 @@ export default function RestaurantManagement() {
           <motion.div
             key={stat.label}
             variants={{ hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0 } }}
+            whileHover={{ y: -3, boxShadow: '0 8px 30px rgba(0,0,0,0.08)' }}
             className={`bg-white rounded-2xl shadow-card p-4 border-l-4 ${stat.color}`}
           >
             <p className="text-2xl font-black text-gray-800">{stat.value}</p>

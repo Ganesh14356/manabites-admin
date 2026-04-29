@@ -35,6 +35,8 @@ export interface AdminDoc {
   uid: string;
   email: string;
   name?: string;
+  phone?: string;
+  lastLoginAt?: FirestoreDate;
   createdAt: FirestoreDate;
 }
 

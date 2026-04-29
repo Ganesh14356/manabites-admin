@@ -1,7 +1,7 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import {
   Store, Users, Bike, Settings, LogOut, Menu, X, ShoppingBag,
-  BarChart2, DollarSign, Tag, ShieldCheck, UserCheck, CreditCard,
+  BarChart2, DollarSign, Tag, ShieldCheck, UserCheck, CreditCard, Image,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -21,6 +21,7 @@ const BASE_NAV = [
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
+  { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
 
@@ -135,12 +136,17 @@ export default function AdminLayout() {
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-          {NAV_ITEMS.map(item => {
+          {NAV_ITEMS.map((item, idx) => {
             const isActive = location.pathname.startsWith(item.path);
             const Icon = item.icon;
             return (
-              <Link
+              <motion.div
                 key={item.name}
+                initial={{ opacity: 0, x: -16 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: idx * 0.04, duration: 0.25, ease: 'easeOut' }}
+              >
+              <Link
                 to={item.path}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
@@ -179,6 +185,7 @@ export default function AdminLayout() {
                   <span className="w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0" />
                 )}
               </Link>
+              </motion.div>
             );
           })}
         </nav>
@@ -225,7 +232,17 @@ export default function AdminLayout() {
           </div>
         </div>
 
-        <Outlet />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            <Outlet />
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Mobile overlay */}
