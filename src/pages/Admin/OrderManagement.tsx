@@ -50,7 +50,8 @@ export default function OrderManagement() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [selectedOrder, setSelectedOrder] = useState<OrderDoc | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const selectedOrder = useMemo(() => orders.find(o => o.id === selectedOrderId) ?? null, [orders, selectedOrderId]);
 
   // Rider assignment state
   const [riders, setRiders] = useState<RiderOption[]>([]);
@@ -61,7 +62,26 @@ export default function OrderManagement() {
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snapshot => {
-      setOrders(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as OrderDoc)));
+      setOrders(snapshot.docs.map(d => {
+        const data = d.data() as Record<string, any>;
+        return {
+          id: d.id,
+          ...data,
+          // normalize field name variants written by different apps
+          customerName: data.customerName || data.name || '—',
+          totalAmount:  data.totalAmount ?? data.total ?? data.orderAmount ?? 0,
+          deliveryAddress: typeof data.deliveryAddress === 'string'
+            ? data.deliveryAddress
+            : data.deliveryAddress
+              ? [data.deliveryAddress.street, data.deliveryAddress.city, data.deliveryAddress.state, data.deliveryAddress.pincode].filter(Boolean).join(', ')
+              : data.address || '—',
+          items: (data.items || []).map((item: any) => ({
+            ...item,
+            quantity: item.quantity ?? item.qty ?? 1,
+            price:    item.price ?? item.unitPrice ?? 0,
+          })),
+        } as OrderDoc;
+      }));
       setLoading(false);
     }, err => {
       toast.error('Failed to load orders: ' + err.message);
@@ -70,12 +90,17 @@ export default function OrderManagement() {
     return () => unsub();
   }, []);
 
-  // Fetch active riders once
+  // Fetch active riders from the riders collection (keyed by phone number)
   useEffect(() => {
-    getDocs(query(collection(db, 'users'), where('role', '==', 'rider'))).then(snap => {
+    getDocs(query(collection(db, 'riders'), where('approvalStatus', '==', 'approved'))).then(snap => {
       setRiders(
         snap.docs
-          .map(d => ({ uid: d.id, name: d.data().name || '—', phone: d.data().phone || '', vehicleType: d.data().vehicleType }))
+          .map(d => ({
+            uid: d.id, // doc ID is the 10-digit phone number
+            name: d.data().name || '—',
+            phone: d.data().phone || d.id,
+            vehicleType: d.data().vehicle || d.data().vehicleType,
+          }))
           .filter(r => r.name !== '—')
           .sort((a, b) => a.name.localeCompare(b.name))
       );
@@ -88,13 +113,16 @@ export default function OrderManagement() {
     if (!rider) return;
     setAssigningRider(true);
     try {
+      // Set assignedRiderId so the rider app shows the accept/reject popup.
+      // Do NOT set riderId or change status yet — rider must confirm first.
+      const assignmentExpiry = Date.now() + 5 * 60 * 1000; // 5 minutes to accept
       await updateDoc(doc(db, 'orders', selectedOrder.id), {
-        riderId: rider.uid,
-        riderName: rider.name,
+        assignedRiderId:   rider.uid,
+        assignedRiderName: rider.name,
+        assignmentExpiry,
+        updatedAt: Timestamp.now(),
       });
-      // Keep the panel open — the live listener will update selectedOrder via orders state
-      setSelectedOrder(prev => prev ? { ...prev, riderId: rider.uid, riderName: rider.name } : prev);
-      toast.success(`Rider "${rider.name}" assigned successfully`);
+      toast.success(`Rider "${rider.name}" notified — waiting for acceptance`);
       setShowAssignModal(false);
       setSelectedRiderId('');
     } catch {
@@ -120,7 +148,7 @@ export default function OrderManagement() {
     try {
       await updateDoc(doc(db, 'orders', orderId), { status: 'cancelled' });
       toast.success('Order cancelled');
-      setSelectedOrder(null);
+      setSelectedOrderId(null);
     } catch (error) {
       toast.error('Failed to cancel order');
     }
@@ -230,7 +258,7 @@ export default function OrderManagement() {
                       <td className="table-cell text-gray-500 text-xs">{formatDate(o.createdAt)}</td>
                       <td className="table-cell">
                         <button
-                          onClick={() => setSelectedOrder(o)}
+                          onClick={() => setSelectedOrderId(o.id)}
                           className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
                           title="View Details"
                         >
@@ -255,7 +283,7 @@ export default function OrderManagement() {
           <>
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-40" onClick={() => setSelectedOrder(null)}
+              className="fixed inset-0 bg-black/50 z-40" onClick={() => setSelectedOrderId(null)}
             />
             <motion.div
               initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }}
@@ -267,7 +295,7 @@ export default function OrderManagement() {
                   <h2 className="text-lg font-black text-gray-800">Order Details</h2>
                   <p className="text-xs text-gray-500 font-mono mt-1">ID: {selectedOrder.id}</p>
                 </div>
-                <button onClick={() => setSelectedOrder(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
+                <button onClick={() => setSelectedOrderId(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
                   <XCircle className="w-5 h-5 text-gray-600" />
                 </button>
               </div>

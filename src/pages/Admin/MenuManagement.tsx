@@ -7,7 +7,7 @@ import { z } from 'zod';
 import toast from 'react-hot-toast';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, serverTimestamp, getDoc
+  onSnapshot, query, orderBy, where, serverTimestamp, getDoc
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -59,9 +59,10 @@ export default function MenuManagement() {
       }
     });
 
-    // Listen to menu items
+    // Listen to menu items (top-level collection filtered by restaurantId)
     const q = query(
-      collection(db, 'restaurants', restaurantId, 'menuItems'),
+      collection(db, 'menuItems'),
+      where('restaurantId', '==', restaurantId),
       orderBy('createdAt', 'desc')
     );
 
@@ -89,7 +90,7 @@ export default function MenuManagement() {
 
     try {
       if (editTarget) {
-        await updateDoc(doc(db, 'restaurants', restaurantId, 'menuItems', editTarget.id), {
+        await updateDoc(doc(db, 'menuItems', editTarget.id), {
           name: data.name,
           description: data.description || '',
           price: Number(data.price),
@@ -99,7 +100,8 @@ export default function MenuManagement() {
         });
         toast.success('Menu item updated');
       } else {
-        await addDoc(collection(db, 'restaurants', restaurantId, 'menuItems'), {
+        await addDoc(collection(db, 'menuItems'), {
+          restaurantId,
           name: data.name,
           description: data.description || '',
           price: Number(data.price),
@@ -119,9 +121,8 @@ export default function MenuManagement() {
   };
 
   const handleToggleStatus = async (item: any) => {
-    if (!restaurantId) return;
     try {
-      await updateDoc(doc(db, 'restaurants', restaurantId, 'menuItems', item.id), {
+      await updateDoc(doc(db, 'menuItems', item.id), {
         isAvailable: !item.isAvailable
       });
       toast.success(`Item ${item.isAvailable ? 'disabled' : 'enabled'}`);
@@ -131,10 +132,8 @@ export default function MenuManagement() {
   };
 
   const handleDelete = async (item: any) => {
-    if (!restaurantId) return;
-
     try {
-      await deleteDoc(doc(db, 'restaurants', restaurantId, 'menuItems', item.id));
+      await deleteDoc(doc(db, 'menuItems', item.id));
       toast.success('Item deleted successfully');
     } catch (error) {
       toast.error('Failed to delete item');

@@ -1,7 +1,9 @@
 import { Link, useLocation, Outlet, useNavigate } from 'react-router-dom';
 import {
   Store, Users, Settings, LogOut, Menu, X, ShoppingBag,
-  BarChart2, DollarSign, Tag, ShieldCheck, CreditCard, Image,
+  BarChart2, DollarSign, Tag, ShieldCheck, CreditCard, Image, Bike,
+  MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
+  Calculator, Percent,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -15,8 +17,20 @@ const BASE_NAV = [
   { name: 'Orders',               path: '/admin/orders',               icon: ShoppingBag },
   { name: 'Restaurants',          path: '/admin/restaurants',          icon: Store      },
   { name: 'Approvals',            path: '/admin/restaurants-approval', icon: ShieldCheck },
+  { name: 'Riders',               path: '/admin/riders',               icon: Bike       },
+  { name: 'Rider Approvals',      path: '/admin/rider-approvals',      icon: ShieldCheck },
+  { name: 'Live Map',             path: '/admin/live-map',             icon: MapPin      },
+  { name: 'Rider Performance',    path: '/admin/rider-performance',    icon: TrendingUp  },
+  { name: 'Geofencing',           path: '/admin/geofencing',           icon: Target      },
+  { name: 'Notifications',        path: '/admin/notifications',        icon: Bell        },
+  { name: 'Refunds',              path: '/admin/refunds',              icon: RefreshCw   },
+  { name: 'Reviews',              path: '/admin/reviews',              icon: Star        },
+  { name: 'Rating Appeals',       path: '/admin/rating-appeals',       icon: MessageSquareWarning },
+  { name: 'SOS Alerts',           path: '/admin/sos-alerts',           icon: AlertTriangle },
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
+  { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
+  { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
@@ -30,17 +44,66 @@ export default function AdminLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
+  const [pendingRiders, setPendingRiders] = useState(0);
+  const [pendingRefunds, setPendingRefunds] = useState(0);
+  const [activeSOS, setActiveSOS] = useState(0);
+  const [pendingAppeals, setPendingAppeals] = useState(0);
 
   // Live pending restaurant count for badge
   useEffect(() => {
+    if (!user) return;
     const q = query(collection(db, 'restaurants'), where('approved', '==', false));
     const unsub = onSnapshot(q, snap => {
       const count = snap.docs.filter(d => d.data().status !== 'rejected').length;
       setPendingApprovals(count);
     }, () => {});
     return () => unsub();
-  }, []);
+  }, [user]);
 
+  // Live pending rider count for badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'riders'), where('approved', '==', false));
+    const unsub = onSnapshot(q, snap => {
+      const count = snap.docs.filter(d => {
+        const s = d.data().status ?? d.data().approvalStatus ?? '';
+        return s !== 'rejected';
+      }).length;
+      setPendingRiders(count);
+    }, () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live pending refunds badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'orders'),
+      where('status', '==', 'cancelled'),
+      where('paymentStatus', '==', 'paid'),
+    );
+    const unsub = onSnapshot(q, snap => {
+      const count = snap.docs.filter(d => !d.data().refundStatus || d.data().refundStatus === 'pending').length;
+      setPendingRefunds(count);
+    }, () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live SOS alerts badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'sos_alerts'), where('status', '==', 'active'));
+    const unsub = onSnapshot(q, snap => setActiveSOS(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live rating appeals badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'ratingAppeals'), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, snap => setPendingAppeals(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -120,15 +183,40 @@ export default function AdminLayout() {
                 <span className="flex-1">{item.name}</span>
                 {/* Pending restaurant approvals badge */}
                 {item.path === '/admin/restaurants-approval' && pendingApprovals > 0 && (
-                  <motion.span
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1"
-                  >
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
                     {pendingApprovals > 99 ? '99+' : pendingApprovals}
                   </motion.span>
                 )}
-                {isActive && !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0) && (
+                {/* Pending rider approvals badge */}
+                {item.path === '/admin/rider-approvals' && pendingRiders > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-amber-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {pendingRiders > 99 ? '99+' : pendingRiders}
+                  </motion.span>
+                )}
+                {/* Pending refunds badge */}
+                {item.path === '/admin/refunds' && pendingRefunds > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-yellow-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {pendingRefunds > 99 ? '99+' : pendingRefunds}
+                  </motion.span>
+                )}
+                {/* Active SOS badge */}
+                {item.path === '/admin/sos-alerts' && activeSOS > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1 animate-pulse">
+                    {activeSOS > 99 ? '99+' : activeSOS}
+                  </motion.span>
+                )}
+                {/* Pending appeals badge */}
+                {item.path === '/admin/rating-appeals' && pendingAppeals > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-orange-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {pendingAppeals > 99 ? '99+' : pendingAppeals}
+                  </motion.span>
+                )}
+                {isActive && !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0) && !(item.path === '/admin/rider-approvals' && pendingRiders > 0) && !(item.path === '/admin/refunds' && pendingRefunds > 0) && !(item.path === '/admin/sos-alerts' && activeSOS > 0) && !(item.path === '/admin/rating-appeals' && pendingAppeals > 0) && (
                   <span className="w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0" />
                 )}
               </Link>

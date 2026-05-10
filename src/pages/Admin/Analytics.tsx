@@ -396,7 +396,7 @@ export default function Analytics() {
           </div>
         </div>
         <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={288}>
             <AreaChart data={salesData}>
               <defs>
                 <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
@@ -430,7 +430,7 @@ export default function Analytics() {
           {revenueBreakdown.length > 0 ? (
             <div className="flex items-center gap-6">
               <div className="h-56 flex-1">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={224}>
                   <PieChart>
                     <Pie
                       data={revenueBreakdown}
@@ -476,7 +476,7 @@ export default function Analytics() {
         >
           <h3 className="text-lg font-bold text-gray-800 mb-5">Order Volumes</h3>
           <div className="h-56">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height={224}>
               <BarChart data={salesData.slice(-8)} barSize={20}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 12 }} />
