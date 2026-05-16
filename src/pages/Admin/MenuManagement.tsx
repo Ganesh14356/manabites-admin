@@ -11,9 +11,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import { uploadToImgBB } from '../../lib/imgbb';
 import {
   Plus, Edit2, Trash2, ToggleLeft, ToggleRight,
-  ArrowLeft, X, Search, Image as ImageIcon
+  ArrowLeft, X, Search, Image as ImageIcon, Camera
 } from 'lucide-react';
 
 const menuItemSchema = z.object({
@@ -21,7 +22,7 @@ const menuItemSchema = z.object({
   description: z.string().optional(),
   price: z.string().refine(v => !isNaN(Number(v)) && Number(v) >= 0, 'Invalid price'),
   category: z.string().min(2, 'Category is required'),
-  imageUrl: z.string().url('Must be a valid URL').optional().or(z.literal('')),
+  isVeg: z.boolean().optional(),
 });
 
 type MenuFormData = z.infer<typeof menuItemSchema>;
@@ -38,6 +39,9 @@ export default function MenuManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editTarget, setEditTarget] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<MenuFormData>({
     resolver: zodResolver(menuItemSchema),
@@ -80,13 +84,29 @@ export default function MenuManagement() {
   const filteredItems = useMemo(() => {
     return menuItems.filter(item =>
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.category.toLowerCase().includes(searchQuery.toLowerCase())
+      (item.category ?? item.categoryId ?? '').toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [menuItems, searchQuery]);
 
   const onSubmit = async (data: MenuFormData) => {
     if (!restaurantId) return;
     setIsSubmitting(true);
+
+    let imageUrl = editTarget?.imageUrl || '';
+    if (imageFile) {
+      setUploadingImage(true);
+      try {
+        imageUrl = await uploadToImgBB(imageFile);
+      } catch {
+        toast.error('Image upload failed. Please try again.');
+        setIsSubmitting(false);
+        setUploadingImage(false);
+        return;
+      }
+      setUploadingImage(false);
+    } else if (!previewUrl) {
+      imageUrl = '';
+    }
 
     try {
       if (editTarget) {
@@ -95,7 +115,8 @@ export default function MenuManagement() {
           description: data.description || '',
           price: Number(data.price),
           category: data.category,
-          imageUrl: data.imageUrl || '',
+          isVeg: data.isVeg ?? false,
+          imageUrl,
           updatedAt: serverTimestamp(),
         });
         toast.success('Menu item updated');
@@ -106,7 +127,8 @@ export default function MenuManagement() {
           description: data.description || '',
           price: Number(data.price),
           category: data.category,
-          imageUrl: data.imageUrl || '',
+          isVeg: data.isVeg ?? false,
+          imageUrl,
           isAvailable: true,
           createdAt: serverTimestamp(),
         });
@@ -147,15 +169,19 @@ export default function MenuManagement() {
       description: item.description,
       price: item.price.toString(),
       category: item.category,
-      imageUrl: item.imageUrl,
+      isVeg: item.isVeg ?? false,
     });
+    setPreviewUrl(item.imageUrl || null);
+    setImageFile(null);
     setShowAddModal(true);
   };
 
   const closeModal = () => {
     setShowAddModal(false);
     setEditTarget(null);
-    reset({ name: '', description: '', price: '', category: '', imageUrl: '' });
+    setImageFile(null);
+    setPreviewUrl(null);
+    reset({ name: '', description: '', price: '', category: '', isVeg: false });
   };
 
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
@@ -309,6 +335,41 @@ export default function MenuManagement() {
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-5">
+                {/* Image upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Item Photo (Optional)</label>
+                  <label className="cursor-pointer block">
+                    <div className={`w-full h-36 border-2 border-dashed rounded-xl flex items-center justify-center overflow-hidden transition-colors ${previewUrl ? 'border-transparent' : 'border-gray-200 hover:border-brand'}`}>
+                      {previewUrl ? (
+                        <img src={previewUrl} className="w-full h-full object-cover rounded-xl" alt="preview" />
+                      ) : (
+                        <div className="text-center">
+                          <Camera className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                          <p className="text-xs text-gray-400">Click to upload photo</p>
+                        </div>
+                      )}
+                    </div>
+                    <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      setImageFile(file);
+                      setPreviewUrl(URL.createObjectURL(file));
+                    }} />
+                  </label>
+                  {previewUrl && (
+                    <button type="button" onClick={() => { setImageFile(null); setPreviewUrl(null); }}
+                      className="mt-1.5 text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                      <X className="w-3 h-3" /> Remove photo
+                    </button>
+                  )}
+                  {uploadingImage && (
+                    <p className="text-xs text-brand mt-1 flex items-center gap-1.5">
+                      <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin inline-block" />
+                      Uploading...
+                    </p>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Item Name *</label>
                   <input {...register('name')} className={`input-field ${errors.name ? 'border-red-400' : ''}`} placeholder="Chicken Biryani" />
@@ -333,10 +394,16 @@ export default function MenuManagement() {
                   <textarea {...register('description')} rows={3} className="input-field resize-none" placeholder="Delicious spicy chicken biryani..." />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Image URL (Optional)</label>
-                  <input {...register('imageUrl')} className={`input-field ${errors.imageUrl ? 'border-red-400' : ''}`} placeholder="https://..." />
-                  {errors.imageUrl && <p className="text-red-500 text-xs mt-1">{errors.imageUrl.message}</p>}
+                {/* Veg / Non-veg */}
+                <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Vegetarian</p>
+                    <p className="text-xs text-gray-400">Show green dot on customer app</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" {...register('isVeg')} className="sr-only peer" />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500" />
+                  </label>
                 </div>
 
                 <motion.button
@@ -345,7 +412,9 @@ export default function MenuManagement() {
                   whileTap={{ scale: 0.97 }}
                   className="btn-primary w-full disabled:opacity-60"
                 >
-                  {isSubmitting ? 'Saving...' : editTarget ? 'Save Changes' : 'Add Item'}
+                  {isSubmitting ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Saving...</>
+                  ) : editTarget ? 'Save Changes' : 'Add Item'}
                 </motion.button>
               </form>
             </motion.div>
