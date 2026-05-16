@@ -14,7 +14,7 @@ import {
 
 const ROLE_LINKS: Record<string, string> = {
   rider:      'https://manabites-rider.vercel.app',
-  restaurant: 'https://restarent-tau.vercel.app/',
+  restaurant: 'https://restarent-tau.vercel.app/dashboard',
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
