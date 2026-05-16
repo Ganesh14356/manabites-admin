@@ -2,15 +2,15 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  collection, query, where, onSnapshot, doc, updateDoc,
+  collection, query, onSnapshot, doc, updateDoc,
   serverTimestamp, orderBy, Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
-  Search, CheckCircle, XCircle, Eye, Clock, Filter,
-  Store, Phone, MapPin, Calendar, ChefHat, FileText,
+  Search, CheckCircle, XCircle, Eye, Clock,
+  Store, Phone, MapPin, Calendar, ChefHat, DollarSign,
   X, AlertTriangle, ChevronLeft, ChevronRight, ExternalLink,
-  ShieldCheck, ShieldX, Building2, Image,
+  ShieldCheck, ShieldX, Building2, Edit2, Save,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ interface Restaurant {
   bankIFSC?: string;
   openingTime?: string;
   closingTime?: string;
+  commissionRate?: number;
   rejectedReason?: string;
   approvedAt?: Timestamp;
   rejectedAt?: Timestamp;
@@ -121,6 +122,11 @@ export default function RestaurantApproval() {
   // Detail modal
   const [detailTarget, setDetailTarget]   = useState<Restaurant | null>(null);
 
+  // Edit mode inside detail modal
+  const [isEditing, setIsEditing]         = useState(false);
+  const [editData, setEditData]           = useState<Partial<Restaurant>>({});
+  const [saving, setSaving]               = useState(false);
+
   // ── Realtime listener (all restaurants) ───────────────────────────────────
   useEffect(() => {
     setLoading(true);
@@ -172,16 +178,26 @@ export default function RestaurantApproval() {
   // Reset to page 1 on filter change
   useEffect(() => { setPage(1); }, [searchQuery, statusFilter]);
 
+  // Keep detailTarget in sync with live Firestore data so edit form shows fresh values
+  useEffect(() => {
+    if (!detailTarget) return;
+    const updated = restaurants.find(r => r.id === detailTarget.id);
+    if (updated) setDetailTarget(updated);
+  }, [restaurants]);
+
   // ── Actions ───────────────────────────────────────────────────────────────
 
   const handleApprove = async (r: Restaurant) => {
     setApprovingId(r.id);
     try {
       await updateDoc(doc(db, 'restaurants', r.id), {
-        approved:   true,
-        status:     'approved',
-        approvedAt: serverTimestamp(),
-        rejectedReason: null,
+        approved:        true,
+        isApproved:      true,
+        isActive:        true,
+        status:          'approved',
+        approvedAt:      serverTimestamp(),
+        rejectionReason: null,
+        rejectedReason:  null,
       });
       toast.success(`✅ "${r.name}" approved successfully!`, { duration: 4000 });
     } catch (err: any) {
@@ -200,10 +216,13 @@ export default function RestaurantApproval() {
     setRejecting(true);
     try {
       await updateDoc(doc(db, 'restaurants', rejectTarget.id), {
-        approved:       false,
-        status:         'rejected',
-        rejectedReason: rejectReason.trim(),
-        rejectedAt:     serverTimestamp(),
+        approved:        false,
+        isApproved:      false,
+        isActive:        false,
+        status:          'rejected',
+        rejectionReason: rejectReason.trim(),
+        rejectedReason:  rejectReason.trim(),
+        rejectedAt:      serverTimestamp(),
       });
       toast.error(`❌ "${rejectTarget.name}" has been rejected`, { duration: 4000 });
       setRejectTarget(null);
@@ -212,6 +231,34 @@ export default function RestaurantApproval() {
       toast.error('Rejection failed: ' + err.message);
     } finally {
       setRejecting(false);
+    }
+  };
+
+  const openEdit = (r: Restaurant) => {
+    setEditData({
+      name: r.name, phone: r.phone, email: r.email ?? '',
+      address: r.address, city: r.city ?? '',
+      openingTime: r.openingTime ?? '', closingTime: r.closingTime ?? '',
+      cuisine: r.cuisine ?? [],
+      commissionRate: r.commissionRate ?? 10,
+    });
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!detailTarget) return;
+    setSaving(true);
+    try {
+      await updateDoc(doc(db, 'restaurants', detailTarget.id), {
+        ...editData,
+        updatedAt: serverTimestamp(),
+      });
+      toast.success('Restaurant info updated!');
+      setIsEditing(false);
+    } catch (err: any) {
+      toast.error('Update failed: ' + err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -396,9 +443,9 @@ export default function RestaurantApproval() {
                           {/* Status */}
                           <td className="table-cell">
                             <StatusBadge status={effectiveStatus} />
-                            {effectiveStatus === 'rejected' && r.rejectedReason && (
-                              <p className="text-[10px] text-red-500 mt-1 max-w-[100px] truncate" title={r.rejectedReason}>
-                                {r.rejectedReason}
+                            {effectiveStatus === 'rejected' && (r.rejectedReason || (r as any).rejectionReason) && (
+                              <p className="text-[10px] text-red-500 mt-1 max-w-[100px] truncate" title={r.rejectedReason || (r as any).rejectionReason}>
+                                {r.rejectedReason || (r as any).rejectionReason}
                               </p>
                             )}
                           </td>
@@ -647,7 +694,7 @@ export default function RestaurantApproval() {
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm"
-              onClick={() => setDetailTarget(null)}
+              onClick={() => { setDetailTarget(null); setIsEditing(false); }}
             />
             <motion.div
               initial={{ opacity: 0, x: '100%' }}
@@ -673,36 +720,107 @@ export default function RestaurantApproval() {
                     <StatusBadge status={(detailTarget.status as ApprovalStatus) || (detailTarget.approved ? 'approved' : 'pending')} />
                   </div>
                 </div>
-                <button onClick={() => setDetailTarget(null)} className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200">
-                  <X className="w-4 h-4 text-gray-600" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <motion.button
+                    whileTap={{ scale: 0.94 }}
+                    onClick={() => isEditing ? setIsEditing(false) : openEdit(detailTarget)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      isEditing
+                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                    }`}
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    {isEditing ? 'Cancel' : 'Edit'}
+                  </motion.button>
+                  <button onClick={() => { setDetailTarget(null); setIsEditing(false); }} className="w-9 h-9 bg-gray-100 rounded-full flex items-center justify-center hover:bg-gray-200">
+                    <X className="w-4 h-4 text-gray-600" />
+                  </button>
+                </div>
               </div>
 
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-                {/* Basic Info */}
+                {/* Basic Info / Edit Form */}
                 <section>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Restaurant Info</p>
-                  <div className="space-y-2">
-                    {[
-                      { icon: Store,    label: 'Name',     value: detailTarget.name },
-                      { icon: Phone,    label: 'Phone',    value: detailTarget.phone || '—' },
-                      { icon: Building2, label: 'Email',   value: detailTarget.email || '—' },
-                      { icon: MapPin,   label: 'Address',  value: `${detailTarget.address}${detailTarget.city ? ', ' + detailTarget.city : ''}` || '—' },
-                      { icon: ChefHat,  label: 'Cuisine',  value: (detailTarget.cuisine || []).join(', ') || '—' },
-                      { icon: Clock,    label: 'Hours',    value: detailTarget.openingTime && detailTarget.closingTime ? `${detailTarget.openingTime} – ${detailTarget.closingTime}` : '—' },
-                      { icon: Calendar, label: 'Applied',  value: formatDateTime(detailTarget.createdAt) },
-                    ].map(row => (
-                      <div key={row.label} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
-                        <row.icon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{row.label}</p>
-                          <p className="text-sm font-semibold text-gray-800 truncate">{row.value}</p>
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Name *',   key: 'name',    type: 'text' },
+                        { label: 'Phone',    key: 'phone',   type: 'tel'  },
+                        { label: 'Email',    key: 'email',   type: 'email' },
+                        { label: 'Address',  key: 'address', type: 'text' },
+                        { label: 'City',     key: 'city',    type: 'text' },
+                        { label: 'Opening Time', key: 'openingTime', type: 'time' },
+                        { label: 'Closing Time', key: 'closingTime', type: 'time' },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{f.label}</label>
+                          <input
+                            type={f.type}
+                            value={(editData as any)[f.key] ?? ''}
+                            onChange={e => setEditData(d => ({ ...d, [f.key]: e.target.value }))}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand transition-colors"
+                          />
                         </div>
+                      ))}
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Cuisine (comma-separated)</label>
+                        <input
+                          type="text"
+                          value={(editData.cuisine || []).join(', ')}
+                          onChange={e => setEditData(d => ({ ...d, cuisine: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand transition-colors"
+                          placeholder="North Indian, Chinese, Fast Food"
+                        />
                       </div>
-                    ))}
-                  </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">ManaBites Commission Rate (%)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.5}
+                          value={(editData as any).commissionRate ?? 10}
+                          onChange={e => setEditData(d => ({ ...d, commissionRate: parseFloat(e.target.value) || 0 }))}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand transition-colors"
+                          placeholder="10"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">% of subtotal deducted as platform commission on each delivered order</p>
+                      </div>
+                      <motion.button
+                        whileTap={{ scale: 0.97 }}
+                        onClick={handleSaveEdit}
+                        disabled={saving}
+                        className="w-full py-2.5 bg-brand text-white font-bold rounded-xl flex items-center justify-center gap-2 disabled:opacity-60"
+                      >
+                        {saving ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : <><Save className="w-4 h-4" /> Save Changes</>}
+                      </motion.button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {[
+                        { icon: Store,    label: 'Name',     value: detailTarget.name },
+                        { icon: Phone,    label: 'Phone',    value: detailTarget.phone || '—' },
+                        { icon: Building2, label: 'Email',   value: detailTarget.email || '—' },
+                        { icon: MapPin,   label: 'Address',  value: `${detailTarget.address}${detailTarget.city ? ', ' + detailTarget.city : ''}` || '—' },
+                        { icon: ChefHat,  label: 'Cuisine',  value: (detailTarget.cuisine || []).join(', ') || '—' },
+                        { icon: Clock,    label: 'Hours',    value: detailTarget.openingTime && detailTarget.closingTime ? `${detailTarget.openingTime} – ${detailTarget.closingTime}` : '—' },
+                        { icon: Calendar, label: 'Applied',  value: formatDateTime(detailTarget.createdAt) },
+                        { icon: DollarSign, label: 'Commission', value: `${detailTarget.commissionRate ?? 10}%` },
+                      ].map(row => (
+                        <div key={row.label} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                          <row.icon className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{row.label}</p>
+                            <p className="text-sm font-semibold text-gray-800 truncate">{row.value}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 {/* Owner Info */}
@@ -731,11 +849,11 @@ export default function RestaurantApproval() {
                 </section>
 
                 {/* Rejection reason (if rejected) */}
-                {detailTarget.status === 'rejected' && detailTarget.rejectedReason && (
+                {detailTarget.status === 'rejected' && (detailTarget.rejectedReason || (detailTarget as any).rejectionReason) && (
                   <section>
                     <p className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3">Rejection Reason</p>
                     <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-sm text-red-700 font-medium">{detailTarget.rejectedReason}</p>
+                      <p className="text-sm text-red-700 font-medium">{detailTarget.rejectedReason || (detailTarget as any).rejectionReason}</p>
                       {detailTarget.rejectedAt && (
                         <p className="text-xs text-red-400 mt-2">Rejected on {formatDateTime(detailTarget.rejectedAt)}</p>
                       )}
