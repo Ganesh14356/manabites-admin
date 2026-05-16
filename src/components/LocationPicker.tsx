@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { MapPin, Loader, X, Check } from 'lucide-react';
+import { MapPin, Loader, X, Check, LocateFixed } from 'lucide-react';
 
 // Fix default marker icons
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -56,6 +56,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [detecting, setDetecting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -114,6 +115,34 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   const handleMapClick = useCallback((clickLat: number, clickLng: number) => {
     onChange({ address: query || `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`, lat: clickLat, lng: clickLng });
   }, [onChange, query]);
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) return;
+    setDetecting(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude: dLat, longitude: dLng } = pos.coords;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${dLat}&lon=${dLng}&format=json`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          const data = await res.json();
+          const addr = data.display_name || `${dLat.toFixed(5)}, ${dLng.toFixed(5)}`;
+          setQuery(addr);
+          onChange({ address: addr, lat: dLat, lng: dLng });
+        } catch {
+          const addr = `${dLat.toFixed(5)}, ${dLng.toFixed(5)}`;
+          setQuery(addr);
+          onChange({ address: addr, lat: dLat, lng: dLng });
+        } finally {
+          setDetecting(false);
+        }
+      },
+      () => setDetecting(false),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -177,6 +206,19 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
           </ul>
         )}
       </div>
+
+      {/* Detect current location */}
+      <button
+        type="button"
+        onClick={handleDetectLocation}
+        disabled={detecting}
+        className="flex items-center gap-2 text-sm font-medium text-brand hover:text-brand/80 disabled:opacity-50 transition-colors"
+      >
+        {detecting
+          ? <Loader className="w-4 h-4 animate-spin" />
+          : <LocateFixed className="w-4 h-4" />}
+        {detecting ? 'Detecting location...' : 'Use my current location'}
+      </button>
 
       {/* Map box */}
       <div className="rounded-xl overflow-hidden border border-gray-200" style={{ height: 200 }}>
