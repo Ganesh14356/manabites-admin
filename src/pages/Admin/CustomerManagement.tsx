@@ -9,8 +9,13 @@ import {
 import { auth, db } from '../../firebase';
 import {
   Key, ToggleLeft, ToggleRight, Search, Users, X,
-  ShoppingBag, Clock, Download, FileText,
+  ShoppingBag, Clock, Download, FileText, ExternalLink, UserCog,
 } from 'lucide-react';
+
+const ROLE_LINKS: Record<string, string> = {
+  rider:      'https://manabites-rider.vercel.app',
+  restaurant: 'https://restarent-tau.vercel.app/',
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,6 +160,15 @@ export default function CustomerManagement() {
     } catch (err: any) { toast.error(err.message); }
   };
 
+  const handleChangeRole = async (c: CustomerDoc, newRole: string) => {
+    try {
+      await updateDoc(doc(db, 'users', c.uid), { role: newRole, updatedAt: new Date() });
+      toast.success(`${c.name || 'User'} role changed to ${newRole}`);
+      const link = ROLE_LINKS[newRole];
+      if (link) window.open(link, '_blank', 'noopener,noreferrer');
+    } catch { toast.error('Failed to change role'); }
+  };
+
   // ── Download customer statement ────────────────────────────────────────────
   const downloadCustomerStatement = () => {
     const rows = [
@@ -216,7 +230,7 @@ export default function CustomerManagement() {
       </motion.div>
 
       {/* Stat Cards with green animation */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         {[
           { label: 'Total Members', value: stats.total, color: 'border-green-500', bg: 'bg-green-50', textColor: 'text-green-700' },
           { label: 'Active', value: stats.active, color: 'border-emerald-400', bg: 'bg-emerald-50', textColor: 'text-emerald-700' },
@@ -343,7 +357,7 @@ export default function CustomerManagement() {
                         </td>
                         <td className="table-cell text-gray-400 text-xs">{formatDate(c.createdAt)}</td>
                         <td className="table-cell" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
                             <button onClick={() => handleResetPassword(c)} className="w-7 h-7 bg-yellow-50 text-yellow-600 rounded-lg flex items-center justify-center hover:bg-yellow-100" title="Reset Password">
                               <Key className="w-3 h-3" />
                             </button>
@@ -359,6 +373,25 @@ export default function CustomerManagement() {
                                 ? <><ToggleRight className="w-3.5 h-3.5" /> Block</>
                                 : <><ToggleLeft className="w-3.5 h-3.5" /> Unblock</>}
                             </button>
+                            {/* Role change buttons */}
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <button
+                                onClick={() => handleChangeRole(c, 'rider')}
+                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                                title="Change role to Rider & open Rider app"
+                              >
+                                <UserCog className="w-3 h-3" /> Rider
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </button>
+                              <button
+                                onClick={() => handleChangeRole(c, 'restaurant')}
+                                className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold bg-orange-50 text-orange-600 hover:bg-orange-100 transition-colors"
+                                title="Change role to Restaurant & open Restaurant app"
+                              >
+                                <UserCog className="w-3 h-3" /> Rest.
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </motion.tr>
