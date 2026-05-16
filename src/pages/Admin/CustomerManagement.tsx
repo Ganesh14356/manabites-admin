@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 const ROLE_LINKS: Record<string, string> = {
-  rider:      'https://manabites-rider.vercel.app/rider-register',
+  rider:      'https://manabites-rider.vercel.app',
   restaurant: 'https://restarent-tau.vercel.app/',
 };
 
