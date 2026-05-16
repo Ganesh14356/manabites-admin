@@ -767,14 +767,41 @@ export default function RestaurantApproval() {
                         </div>
                       ))}
                       <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Cuisine (comma-separated)</label>
-                        <input
-                          type="text"
-                          value={(editData.cuisine || []).join(', ')}
-                          onChange={e => setEditData(d => ({ ...d, cuisine: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:border-brand transition-colors"
-                          placeholder="North Indian, Chinese, Fast Food"
-                        />
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Cuisine</label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            'North Indian','South Indian','Chinese','Fast Food',
+                            'Biryani','Pizza','Burgers','Rolls & Wraps',
+                            'Desserts','Beverages','Healthy','Seafood',
+                            'Street Food','Bakery','Continental','Thali',
+                          ].map(c => {
+                            const selected = (editData.cuisine || []).includes(c);
+                            return (
+                              <button
+                                key={c}
+                                type="button"
+                                onClick={() => setEditData(d => ({
+                                  ...d,
+                                  cuisine: selected
+                                    ? (d.cuisine || []).filter(x => x !== c)
+                                    : [...(d.cuisine || []), c],
+                                }))}
+                                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                                  selected
+                                    ? 'bg-brand text-white border-brand'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-brand hover:text-brand'
+                                }`}
+                              >
+                                {selected ? '✓ ' : ''}{c}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {(editData.cuisine || []).length > 0 && (
+                          <p className="text-xs text-gray-400 mt-1.5">
+                            Selected: {(editData.cuisine || []).join(', ')}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">ManaBites Commission Rate (%)</label>
