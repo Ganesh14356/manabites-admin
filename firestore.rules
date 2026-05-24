@@ -7,10 +7,13 @@ rules_version = '2';
 // Data model assumed:
 //
 //   /admins/{uid}               { role: 'admin' }
-//   /riders/{riderId}           { uid, name, phone, isOnline, activeOrderId, ... }
+//   /riders/{phone}             { uid, name, phone, isOnline, activeOrderId, ... }
 //   /orders/{orderId}           { status, riderId, restaurantId, customerId, ... }
 //   /restaurants/{restaurantId} { name, location, ... }
 //   /customers/{customerId}     { uid, name, ... }
+//
+// Rider docs are keyed by 10-digit phone number (without +91) so the rider
+// app and admin panel always read/write the same document.
 //
 // Access matrix:
 //   - Admin    : full read/write on everything
@@ -47,14 +50,23 @@ service cloud.firestore {
       return isAuth() && uid() == customerId;
     }
 
-    // Fields a rider is allowed to self-update
+    // True when riderId matches the caller's phone number (with or without +91 prefix)
+    function isOwnPhoneDoc(riderId) {
+      return isAuth()
+          && request.auth.token.phone_number != null
+          && (riderId == request.auth.token.phone_number
+              || riderId == request.auth.token.phone_number[3:]);
+    }
+
+    // Fields a rider is allowed to self-update on a uid-keyed doc (legacy)
     function riderAllowedFields() {
       return [
-        'isOnline', 'isAvailable', 'activeOrderId',
+        'status', 'isOnline', 'isAvailable', 'activeOrderId',
         'location', 'lastLocationUpdate',
-        'soundEnabled', 'workArea',
+        'soundEnabled', 'workArea', 'workAreaLocation',
         'vehicle', 'bankAccount', 'ifsc',
-        'totalDeliveries', 'totalEarnings', 'totalDistance',
+        'totalDeliveries', 'totalEarnings', 'totalDistance', 'totalDistanceKm',
+        'todayEarnings', 'weeklyEarnings',
         'updatedAt'
       ];
     }
@@ -82,25 +94,32 @@ service cloud.firestore {
 
     // ── Riders ───────────────────────────────────────────────────────────────
     match /riders/{riderId} {
-      // Read: own doc, admin, or phone-keyed doc (for first-login migration)
-      // Phone auth gives +91XXXXXXXXXX; doc may be keyed as XXXXXXXXXX (10-digit)
+      // Read: own uid-keyed doc, own phone-keyed doc, or admin
       allow read: if isRider(riderId)
                  || isAdmin()
-                 || (isAuth()
-                     && request.auth.token.phone_number != null
-                     && (riderId == request.auth.token.phone_number
-                         || riderId == request.auth.token.phone_number[3:]));
+                 || isOwnPhoneDoc(riderId);
 
-      // Create: own doc (first login via RiderContext.initRider)
-      allow create: if isRider(riderId)
-                   && request.resource.data.uid == riderId;
+      // Create:
+      //   1. Admin pre-creating a rider doc
+      //   2. Rider creating a uid-keyed doc (legacy first-login)
+      //   3. Rider creating their phone-keyed doc on first login
+      allow create: if isAdmin()
+                   || (isRider(riderId) && request.resource.data.uid == riderId)
+                   || (isOwnPhoneDoc(riderId) && request.resource.data.uid == uid());
 
-      // Update: own doc restricted to allowed fields, or admin unrestricted
+      // Update:
+      //   1. Admin — unrestricted
+      //   2. Rider updating uid-keyed doc with allowed fields (legacy)
+      //   3. Rider updating their own phone-keyed doc — any field EXCEPT protected ones
       allow update: if isAdmin()
                    || (isRider(riderId)
                        && request.resource.data.diff(resource.data)
                             .affectedKeys()
-                            .hasOnly(riderAllowedFields()));
+                            .hasOnly(riderAllowedFields()))
+                   || (isOwnPhoneDoc(riderId)
+                       && !request.resource.data.diff(resource.data)
+                            .affectedKeys()
+                            .hasAny(['approvalStatus', 'approved', 'createdAt']));
 
       allow delete: if isAdmin();
     }
@@ -155,6 +174,26 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── Users ────────────────────────────────────────────────────────────────
+    // Covers customers, riders, and restaurant owners linked via Firebase Auth.
+    match /users/{userId} {
+      allow read:   if isAuth() && (uid() == userId || isAdmin());
+      allow create: if isAuth() && uid() == userId;
+      allow update: if isAdmin()
+                   || (isAuth() && uid() == userId
+                       && !request.resource.data.diff(resource.data)
+                            .affectedKeys()
+                            .hasAny(['role', 'isActive']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Rider Notifications ───────────────────────────────────────────────────
+    // Admin writes approval/rejection messages; rider app reads own notification.
+    match /riderNotifications/{riderId} {
+      allow read: if isAdmin() || isOwnPhoneDoc(riderId);
+      allow write: if isAdmin();
+    }
+
     // ── Customers ────────────────────────────────────────────────────────────
     match /customers/{customerId} {
       allow read:   if isCustomer(customerId) || isAdmin();
@@ -164,6 +203,14 @@ service cloud.firestore {
                    && request.resource.data.uid == customerId)
                    || isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // ── Rider Locations (real-time tracking) ─────────────────────────────────
+    match /riderLocations/{locationId} {
+      allow read: if isAdmin()
+                 || (isAuth() && (locationId == uid() || isOwnPhoneDoc(locationId)));
+      allow write: if isAuth()
+                  && (locationId == uid() || isOwnPhoneDoc(locationId));
     }
 
     // ── Delivery Earnings (audit trail) ──────────────────────────────────────
@@ -183,6 +230,96 @@ service cloud.firestore {
       allow read:   if isAuth()
                    && (resource.data.riderId == uid() || isAdmin());
       allow update, delete: if isAdmin();
+    }
+
+    // ── Menu Categories ──────────────────────────────────────────────────────
+    match /menuCategories/{categoryId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+      allow create: if isAdmin();
+    }
+
+    // ── Menu Items ────────────────────────────────────────────────────────────
+    match /menuItems/{itemId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+      allow create: if isAdmin();
+    }
+
+    // ── Notifications ─────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == uid());
+      allow create: if isAdmin() || isAuth();
+      allow update: if isAdmin() || (isAuth() && resource.data.userId == uid());
+      allow delete: if isAdmin();
+    }
+
+    // ── Settings ─────────────────────────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ── Promo Codes ───────────────────────────────────────────────────────────
+    match /promoCodes/{promoId} {
+      allow read: if isAuth();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── Banners ───────────────────────────────────────────────────────────────
+    match /banners/{bannerId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Wallets ───────────────────────────────────────────────────────────────
+    match /wallets/{walletId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.ownerId == uid());
+      allow write: if isAdmin();
+    }
+
+    // ── Wallet Transactions ────────────────────────────────────────────────────
+    match /walletTransactions/{txId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.riderId == uid());
+      allow write: if isAdmin();
+    }
+
+    // ── Payouts ───────────────────────────────────────────────────────────────
+    match /payouts/{payoutId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Commission Ledger ──────────────────────────────────────────────────────
+    match /commissionLedger/{entryId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Support Tickets ────────────────────────────────────────────────────────
+    match /supportTickets/{ticketId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.userId == uid());
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ── SOS Alerts ────────────────────────────────────────────────────────────
+    match /sos_alerts/{alertId} {
+      allow create: if isAuth();
+      allow read, update: if isAdmin();
+    }
+
+    // ── Broadcast Notifications ────────────────────────────────────────────────
+    match /broadcastNotifications/{notifId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Ratings ───────────────────────────────────────────────────────────────
+    match /ratings/{ratingId} {
+      allow read: if isAdmin() || isAuth();
+      allow create: if isAuth();
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     // ── Catch-all: deny everything not matched above ──────────────────────────

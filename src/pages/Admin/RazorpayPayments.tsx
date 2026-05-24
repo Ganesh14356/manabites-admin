@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type ReactElement } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
   CreditCard, TrendingUp, AlertCircle, CheckCircle, RefreshCw,

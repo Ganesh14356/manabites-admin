@@ -6,7 +6,7 @@ import {
   LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
 import { TrendingUp, DollarSign, ShoppingBag, Users, Store, Bike, Award, RefreshCw, Download, FileText } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 
 // ── CSV helper ────────────────────────────────────────────────────────────────
 function downloadCSV(rows: (string | number)[][], filename: string) {

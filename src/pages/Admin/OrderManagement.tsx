@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { OrderId } from '../../components/OrderId';
+import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
   collection, doc, updateDoc, getDocs,
@@ -8,7 +9,7 @@ import {
 import { db } from '../../firebase';
 import {
   Search, Eye, XCircle, UserPlus, MapPin, CheckCircle,
-  AlertTriangle, Bike, ChevronDown, X
+  AlertTriangle, Bike, ChevronDown, X, Clock
 } from 'lucide-react';
 
 interface OrderDoc {
@@ -19,7 +20,7 @@ interface OrderDoc {
   restaurantName: string;
   riderId?: string;
   riderName?: string;
-  status: 'pending' | 'accepted' | 'preparing' | 'ready' | 'picked_up' | 'delivered' | 'cancelled';
+  status: 'pending' | 'accepted' | 'preparing' | 'ready' | 'picked_up' | 'delivered' | 'cancelled' | 'customer_unavailable';
   totalAmount: number;
   deliveryFee: number;
   platformFee: number;
@@ -27,6 +28,17 @@ interface OrderDoc {
   items: any[];
   deliveryAddress: string;
   createdAt: Timestamp;
+  preparingAt?: Timestamp;
+  readyAt?: Timestamp;
+  pickedUpAt?: Timestamp;
+  deliveredAt?: Timestamp;
+  riderArrivedAt?: Timestamp;
+  estimatedCookingMins?: number;
+  deliveryOtpVerified?: boolean;
+  deliveryPhotoUrl?: string;
+  geofenceFailed?: boolean;
+  suspicious?: boolean;
+  waitTimeMins?: number;
 }
 
 interface RiderOption {
@@ -143,6 +155,22 @@ export default function OrderManagement() {
     });
   }, [orders, searchQuery, statusFilter]);
 
+  // Restaurant delay alerts: preparing > 20 min with no readyAt
+  const delayAlerts = useMemo(() => orders.filter(o => {
+    if (o.status !== 'preparing') return false;
+    const t = o.preparingAt?.toMillis?.() ?? ((o as any).acceptedAt)?.toMillis?.() ?? null;
+    if (!t) return false;
+    return (Date.now() - t) > 20 * 60 * 1000 && !o.readyAt;
+  }), [orders]);
+
+  // Rider wait alerts: rider arrived but still not picked up after 10 min
+  const waitAlerts = useMemo(() => orders.filter(o => {
+    if (o.status !== 'ready' && o.status !== 'preparing') return false;
+    const t = o.riderArrivedAt?.toMillis?.() ?? null;
+    if (!t || !o.riderId) return false;
+    return (Date.now() - t) > 10 * 60 * 1000;
+  }), [orders]);
+
   const handleCancelOrder = async (orderId: string) => {
     if (!window.confirm('Are you sure you want to cancel this order?')) return;
     try {
@@ -161,12 +189,44 @@ export default function OrderManagement() {
       case 'picked_up': return 'bg-purple-100 text-purple-800';
       case 'delivered': return 'bg-green-100 text-green-800';
       case 'cancelled': return 'bg-red-100 text-red-800';
+      case 'customer_unavailable': return 'bg-red-100 text-red-800 animate-pulse';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
+      {/* Restaurant Delay Alerts */}
+      {(delayAlerts.length > 0 || waitAlerts.length > 0) && (
+        <div className="mb-5 space-y-2">
+          {delayAlerts.length > 0 && (
+            <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-black text-orange-800">
+                  {delayAlerts.length} Restaurant Delay Alert{delayAlerts.length > 1 ? 's' : ''}
+                </p>
+                <p className="text-xs text-orange-600 mt-0.5">
+                  {delayAlerts.map(o => o.restaurantName || 'Unknown').join(' · ')} — not marked Ready for Pickup after 20 min
+                </p>
+              </div>
+            </div>
+          )}
+          {waitAlerts.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <Clock className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-black text-yellow-800">
+                  {waitAlerts.length} Rider Waiting Alert{waitAlerts.length > 1 ? 's' : ''}
+                </p>
+                <p className="text-xs text-yellow-600 mt-0.5">
+                  Rider has been waiting &gt;10 min at restaurant — may be eligible for wait-time payout
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <motion.div
         className="flex items-start justify-between mb-6"
         initial={{ opacity: 0, y: -12 }}
@@ -203,6 +263,7 @@ export default function OrderManagement() {
           <option value="picked_up">Picked Up</option>
           <option value="delivered">Delivered</option>
           <option value="cancelled">Cancelled</option>
+          <option value="customer_unavailable">Customer Unavailable</option>
         </select>
       </div>
 
@@ -252,19 +313,30 @@ export default function OrderManagement() {
                       <td className="table-cell font-medium">₹{o.totalAmount?.toFixed(2) || '0.00'}</td>
                       <td className="table-cell">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${getStatusColor(o.status)}`}>
-                          {o.status}
+                          {o.status === 'customer_unavailable' ? '🚨 Rider Waiting' : o.status.replace('_', ' ')}
                         </span>
                       </td>
                       <td className="table-cell text-gray-500 text-xs">{formatDate(o.createdAt)}</td>
-                      <td className="table-cell">
-                        <button
-                          onClick={() => setSelectedOrderId(o.id)}
-                          className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
-                          title="View Details"
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
-                      </td>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-1.5">
+                            {o.geofenceFailed && (
+                              <span title="Suspicious delivery - rider too far" className="w-5 h-5 bg-red-100 rounded-full flex items-center justify-center text-[9px]">⚠</span>
+                            )}
+                            {o.deliveryOtpVerified && (
+                              <span title="OTP verified" className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center text-[9px]">🔐</span>
+                            )}
+                            {o.deliveryPhotoUrl && (
+                              <a href={o.deliveryPhotoUrl} target="_blank" rel="noopener noreferrer" title="Delivery photo" className="w-5 h-5 bg-blue-100 rounded-full flex items-center justify-center text-[9px]">📷</a>
+                            )}
+                            <button
+                              onClick={() => setSelectedOrderId(o.id)}
+                              className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100"
+                              title="View Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
                     </motion.tr>
                   ))}
                 </AnimatePresence>
@@ -314,6 +386,42 @@ export default function OrderManagement() {
                     <p className="text-sm font-medium text-gray-800">{formatDate(selectedOrder.createdAt)}</p>
                   </div>
                 </div>
+
+                {/* Restaurant delay badge */}
+                {selectedOrder.status === 'preparing' && (() => {
+                  const t = (selectedOrder as any).preparingAt?.toMillis?.() ?? null;
+                  const waitMins = t ? Math.floor((Date.now() - t) / 60000) : 0;
+                  if (waitMins < 20) return null;
+                  return (
+                    <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-center gap-2">
+                      <span className="text-sm">⚠️</span>
+                      <div>
+                        <p className="text-xs font-black text-orange-800">Restaurant Delayed — {waitMins} min</p>
+                        <p className="text-[10px] text-orange-600">Food not marked Ready after {waitMins} minutes</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Rider wait time compensation */}
+                {(selectedOrder as any).riderArrivedAt && (() => {
+                  const arrivedMs = (selectedOrder as any).riderArrivedAt?.toMillis?.() ?? (selectedOrder as any).riderArrivedAt ?? 0;
+                  const pickedMs = (selectedOrder as any).pickedUpAt?.toMillis?.() ?? (selectedOrder as any).pickedUpAt ?? Date.now();
+                  const waitMins = Math.floor((pickedMs - arrivedMs) / 60000);
+                  if (waitMins < 10) return null;
+                  const compensation = (waitMins - 10) * 2;
+                  return (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex items-center gap-2">
+                      <span className="text-sm">⏱️</span>
+                      <div>
+                        <p className="text-xs font-black text-yellow-800">Rider Wait: {waitMins} min</p>
+                        <p className="text-[10px] text-yellow-600">
+                          Wait-time payout: ₹{compensation} (₹2/min after 10 min) — deducted from restaurant commission
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* People */}
                 <div className="space-y-4">
@@ -389,6 +497,40 @@ export default function OrderManagement() {
                     <span>₹{selectedOrder.totalAmount?.toFixed(2)}</span>
                   </div>
                 </div>
+
+                {/* Delivery Verification */}
+                {(selectedOrder.deliveryOtpVerified !== undefined || selectedOrder.geofenceFailed || selectedOrder.deliveryPhotoUrl) && (
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">Delivery Verification</h3>
+                    <div className="space-y-2">
+                      {selectedOrder.deliveryOtpVerified !== undefined && (
+                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${selectedOrder.deliveryOtpVerified ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                          <span>{selectedOrder.deliveryOtpVerified ? '✅' : '⏳'}</span>
+                          <span className="font-bold">OTP {selectedOrder.deliveryOtpVerified ? 'Verified' : 'Not yet verified'}</span>
+                        </div>
+                      )}
+                      {selectedOrder.deliveryPhotoUrl && (
+                        <a href={selectedOrder.deliveryPhotoUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">
+                          <span>📷</span>
+                          <span className="font-bold">View Delivery Photo</span>
+                        </a>
+                      )}
+                      {selectedOrder.geofenceFailed && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-red-50 text-red-700">
+                          <span>🚨</span>
+                          <span className="font-bold">Suspicious: Rider was &gt;50m from delivery location</span>
+                        </div>
+                      )}
+                      {selectedOrder.waitTimeMins && selectedOrder.waitTimeMins > 10 && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-yellow-50 text-yellow-700">
+                          <span>⏱️</span>
+                          <span className="font-bold">Rider waited {selectedOrder.waitTimeMins} min at restaurant</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Actions */}
@@ -431,7 +573,7 @@ export default function OrderManagement() {
                   </div>
                   <div>
                     <h3 className="text-sm font-black text-gray-800">Assign Rider</h3>
-                    <p className="text-[11px] text-gray-400 font-mono">Order #{selectedOrder.id.slice(0, 8).toUpperCase()}</p>
+                    <p className="text-[11px] text-gray-400">Order <OrderId id={selectedOrder.id} className="text-[11px]" /></p>
                   </div>
                 </div>
                 <button

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
@@ -15,9 +16,29 @@ import PromoCodes from './pages/Admin/PromoCodes';
 import Banners from './pages/Admin/Banners';
 import RestaurantApproval from './pages/Admin/RestaurantApproval';
 import RazorpayPayments from './pages/Admin/RazorpayPayments';
+import RiderManagement from './pages/Admin/RiderManagement';
+import RiderApproval from './pages/Admin/RiderApproval';
+import LiveOrdersMap from './pages/Admin/LiveOrdersMap';
+import RiderPerformance from './pages/Admin/RiderPerformance';
+import Geofencing from './pages/Admin/Geofencing';
+import NotificationsBroadcast from './pages/Admin/NotificationsBroadcast';
+import RefundManagement from './pages/Admin/RefundManagement';
+import ReviewsManagement from './pages/Admin/ReviewsManagement';
+import RatingAppeals from './pages/Admin/RatingAppeals';
+import SOSAlerts from './pages/Admin/SOSAlerts';
+import DailySettlements from './pages/Admin/DailySettlements';
+import Commission from './pages/Admin/Commission';
+import SurgePricing from './pages/Admin/SurgePricing';
+import WalletSubscription from './pages/Admin/WalletSubscription';
+import SubAdminManagement from './pages/Admin/SubAdminManagement';
+import GeoMarketing from './pages/Admin/GeoMarketing';
+import WhatsAppAutomation from './pages/Admin/WhatsAppAutomation';
+import FraudDetection from './pages/Admin/FraudDetection';
+import Blacklist from './pages/Admin/Blacklist';
 
 export default function App() {
   return (
+    <ThemeProvider>
     <AuthProvider>
       <BrowserRouter>
         <Toaster
@@ -52,6 +73,25 @@ export default function App() {
                 <Route path="restaurants-approval" element={<RestaurantApproval />} />
                 <Route path="razorpay" element={<RazorpayPayments />} />
                 <Route path="settings" element={<DeliveryFeeSettings />} />
+                <Route path="riders" element={<RiderManagement />} />
+                <Route path="rider-approvals" element={<RiderApproval />} />
+                <Route path="live-map" element={<LiveOrdersMap />} />
+                <Route path="rider-performance" element={<RiderPerformance />} />
+                <Route path="geofencing" element={<Geofencing />} />
+                <Route path="notifications" element={<NotificationsBroadcast />} />
+                <Route path="refunds" element={<RefundManagement />} />
+                <Route path="reviews" element={<ReviewsManagement />} />
+                <Route path="rating-appeals" element={<RatingAppeals />} />
+                <Route path="sos-alerts" element={<SOSAlerts />} />
+                <Route path="settlements" element={<DailySettlements />} />
+                <Route path="commission" element={<Commission />} />
+                <Route path="surge-pricing" element={<SurgePricing />} />
+                <Route path="wallet" element={<WalletSubscription />} />
+                <Route path="sub-admins" element={<SubAdminManagement />} />
+                <Route path="geo-marketing" element={<GeoMarketing />} />
+                <Route path="whatsapp" element={<WhatsAppAutomation />} />
+                <Route path="fraud" element={<FraudDetection />} />
+                <Route path="blacklist" element={<Blacklist />} />
                 {/* Legacy alias */}
                 <Route path="delivery-settings" element={<Navigate to="/admin/settings" replace />} />
               </Route>
@@ -82,5 +122,6 @@ export default function App() {
         </div>
       </BrowserRouter>
     </AuthProvider>
+    </ThemeProvider>
   );
 }

@@ -3,14 +3,17 @@ import {
   Store, Users, Settings, LogOut, Menu, X, ShoppingBag,
   BarChart2, DollarSign, Tag, ShieldCheck, CreditCard, Image, Bike,
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
-  Calculator, Percent,
+  Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
+  ShieldAlert, Ban,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useTheme } from '../contexts/ThemeContext';
+import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import ChatDrawer from './ChatDrawer';
 
 const BASE_NAV = [
   { name: 'Analytics',            path: '/admin/analytics',            icon: BarChart2  },
@@ -31,9 +34,16 @@ const BASE_NAV = [
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
+  { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
+  { name: 'Wallet & Gold',      path: '/admin/wallet',               icon: Wallet      },
+  { name: 'Sub-Admins',         path: '/admin/sub-admins',           icon: Shield      },
+  { name: 'Geo Marketing',      path: '/admin/geo-marketing',        icon: Crosshair   },
+  { name: 'WhatsApp / SMS',     path: '/admin/whatsapp',             icon: MessageCircle },
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
+  { name: 'Fraud Detection',     path: '/admin/fraud',                icon: ShieldAlert },
+  { name: 'Blacklist',           path: '/admin/blacklist',            icon: Ban        },
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
 
@@ -41,13 +51,19 @@ export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, profile } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
-  const [pendingRiders, setPendingRiders] = useState(0);
-  const [pendingRefunds, setPendingRefunds] = useState(0);
-  const [activeSOS, setActiveSOS] = useState(0);
-  const [pendingAppeals, setPendingAppeals] = useState(0);
+  const [pendingRiders, setPendingRiders]       = useState(0);
+  const [pendingRefunds, setPendingRefunds]     = useState(0);
+  const [activeSOS, setActiveSOS]               = useState(0);
+  const [pendingAppeals, setPendingAppeals]     = useState(0);
+  const [pendingOrders, setPendingOrders]       = useState(0);
+  const [unreadReviews, setUnreadReviews]       = useState(0);
+  const [unreadNotifs, setUnreadNotifs]         = useState(0);
+  const [pendingPayouts, setPendingPayouts]     = useState(0);
 
   // Live pending restaurant count for badge
   useEffect(() => {
@@ -105,6 +121,38 @@ export default function AdminLayout() {
     return () => unsub();
   }, [user]);
 
+  // Live pending orders badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'orders'), where('status', 'in', ['pending', 'placed']));
+    const unsub = onSnapshot(q, snap => setPendingOrders(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live unread reviews badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'reviews'), where('read', '==', false));
+    const unsub = onSnapshot(q, snap => setUnreadReviews(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live unread admin notifications badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'adminNotifications'), where('read', '==', false));
+    const unsub = onSnapshot(q, snap => setUnreadNotifs(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
+
+  // Live pending payouts badge
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'payouts'), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, snap => setPendingPayouts(snap.size), () => {});
+    return () => unsub();
+  }, [user]);
+
   const handleLogout = async () => {
     setLoggingOut(true);
     await signOut(auth);
@@ -138,13 +186,13 @@ export default function AdminLayout() {
 
       {/* ── Sidebar ───────────────────────────────────────────────────────── */}
       <div className={`
-        fixed inset-y-0 left-0 z-30 w-64 bg-white border-r border-gray-200 flex flex-col
+        fixed inset-y-0 left-0 z-30 w-64 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col
         transform transition-transform duration-200 ease-in-out
         md:relative md:translate-x-0
         ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         {/* Logo */}
-        <div className="px-5 py-5 border-b border-gray-100">
+        <div className="px-5 py-5 border-b border-gray-100 dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-brand rounded-xl flex items-center justify-center flex-shrink-0">
               <span className="text-lg leading-none">🍔</span>
@@ -157,7 +205,7 @@ export default function AdminLayout() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto dark:border-gray-700">
           {NAV_ITEMS.map((item, idx) => {
             const isActive = location.pathname.startsWith(item.path);
             const Icon = item.icon;
@@ -173,11 +221,11 @@ export default function AdminLayout() {
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   isActive
-                    ? 'bg-orange-50 text-brand'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    ? 'bg-orange-50 text-brand dark:bg-gray-800 dark:text-orange-400'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
                 }`}
               >
-                <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${isActive ? 'bg-brand text-white' : 'bg-gray-100 text-gray-500'}`}>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${isActive ? 'bg-brand text-white dark:bg-orange-400/20 dark:text-orange-400' : 'bg-gray-100 text-gray-500'}`}>
                   <Icon className="w-4 h-4" />
                 </div>
                 <span className="flex-1">{item.name}</span>
@@ -216,7 +264,45 @@ export default function AdminLayout() {
                     {pendingAppeals > 99 ? '99+' : pendingAppeals}
                   </motion.span>
                 )}
-                {isActive && !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0) && !(item.path === '/admin/rider-approvals' && pendingRiders > 0) && !(item.path === '/admin/refunds' && pendingRefunds > 0) && !(item.path === '/admin/sos-alerts' && activeSOS > 0) && !(item.path === '/admin/rating-appeals' && pendingAppeals > 0) && (
+                {/* Pending orders badge */}
+                {item.path === '/admin/orders' && pendingOrders > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-blue-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {pendingOrders > 99 ? '99+' : pendingOrders}
+                  </motion.span>
+                )}
+                {/* Unread reviews badge */}
+                {item.path === '/admin/reviews' && unreadReviews > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-purple-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {unreadReviews > 99 ? '99+' : unreadReviews}
+                  </motion.span>
+                )}
+                {/* Unread admin notifications badge */}
+                {item.path === '/admin/notifications' && unreadNotifs > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-brand text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {unreadNotifs > 99 ? '99+' : unreadNotifs}
+                  </motion.span>
+                )}
+                {/* Pending payouts badge */}
+                {item.path === '/admin/payouts' && pendingPayouts > 0 && (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }}
+                    className="min-w-[18px] h-[18px] bg-green-500 text-white text-[10px] font-black rounded-full flex items-center justify-center px-1">
+                    {pendingPayouts > 99 ? '99+' : pendingPayouts}
+                  </motion.span>
+                )}
+                {isActive
+                  && !(item.path === '/admin/restaurants-approval' && pendingApprovals > 0)
+                  && !(item.path === '/admin/rider-approvals'      && pendingRiders    > 0)
+                  && !(item.path === '/admin/refunds'              && pendingRefunds   > 0)
+                  && !(item.path === '/admin/sos-alerts'           && activeSOS        > 0)
+                  && !(item.path === '/admin/rating-appeals'       && pendingAppeals   > 0)
+                  && !(item.path === '/admin/orders'               && pendingOrders    > 0)
+                  && !(item.path === '/admin/reviews'              && unreadReviews    > 0)
+                  && !(item.path === '/admin/notifications'        && unreadNotifs     > 0)
+                  && !(item.path === '/admin/payouts'              && pendingPayouts   > 0)
+                  && (
                   <span className="w-1.5 h-1.5 rounded-full bg-brand flex-shrink-0" />
                 )}
               </Link>
@@ -226,14 +312,14 @@ export default function AdminLayout() {
         </nav>
 
         {/* User card + sign out */}
-        <div className="p-3 border-t border-gray-100 space-y-1">
-          <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-gray-50">
+        <div className="p-3 border-t border-gray-100 dark:border-gray-700 space-y-1">
+          <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-gray-50 dark:bg-gray-800">
             <div className="w-8 h-8 rounded-full bg-brand flex items-center justify-center text-white font-black text-sm flex-shrink-0">
               {adminInitial}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-gray-800 truncate">{adminName}</p>
-              <p className="text-xs text-gray-400 truncate">{adminEmail}</p>
+              <p className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{adminName}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-400 truncate">{adminEmail}</p>
             </div>
           </div>
           <button
@@ -250,16 +336,22 @@ export default function AdminLayout() {
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto w-full min-h-screen">
+      <div className="flex-1 overflow-y-auto dark:bg-gray-950 w-full min-h-screen">
         {/* Desktop top bar */}
-        <div className="hidden md:flex items-center justify-between px-6 py-3.5 bg-white border-b border-gray-100 sticky top-0 z-10">
+        <div className="hidden md:flex items-center justify-between px-6 py-3.5 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-10">
           <div>
-            <h2 className="font-black text-gray-800 text-base">{activeNav?.name ?? 'Dashboard'}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <h2 className="font-black text-gray-800 dark:text-gray-100 text-base">{activeNav?.name ?? 'Dashboard'}</h2>
+            <p className="text-xs text-gray-400 dark:text-gray-400 mt-0.5">
               {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <button onClick={toggleTheme} className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" title="Toggle dark mode">
+              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <button onClick={() => setChatOpen(true)} className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 transition-colors" title="Rider Chat">
+              <MessageCircle className="w-4 h-4" />
+            </button>
             <div className="w-7 h-7 rounded-full bg-brand flex items-center justify-center text-white font-black text-xs">
               {adminInitial}
             </div>
@@ -292,6 +384,8 @@ export default function AdminLayout() {
           />
         )}
       </AnimatePresence>
+
+      <ChatDrawer isOpen={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   );
 }

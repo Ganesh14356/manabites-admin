@@ -23,3 +23,10 @@
     @apply px-4 py-3 text-sm;
   }
 }
+
+/* Dark mode variant for Tailwind v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Dark mode shell overrides */
+.dark { color-scheme: dark; }
+.dark body { background-color: #0f172a; }

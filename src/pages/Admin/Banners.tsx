@@ -1,13 +1,21 @@
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
+  addDoc, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, Image } from 'lucide-react';
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, GripVertical, BarChart2, Clock, Calendar, MousePointer, ShoppingBag } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove, SortableContext, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface Banner {
   id: string;
@@ -19,6 +27,13 @@ interface Banner {
   isActive: boolean;
   order: number;
   createdAt: any;
+  startAt?: Timestamp | null;
+  endAt?: Timestamp | null;
+}
+
+interface BannerAnalytics {
+  totalClicks: number;
+  totalConversions: number;
 }
 
 const GRADIENT_OPTIONS = [
@@ -32,64 +47,189 @@ const GRADIENT_OPTIONS = [
 
 const EMOJI_OPTIONS = ['🎉', '🛵', '🌟', '🍕', '🔥', '💰', '🎁', '🍔', '🍜', '🥗'];
 
-type FormData = {
-  title: string;
-  subtitle: string;
-  code: string;
-  emoji: string;
-  gradient: string;
-  order: string;
+function getBannerStatus(banner: Banner): 'scheduled' | 'active' | 'expired' | 'inactive' {
+  if (!banner.isActive) return 'inactive';
+  const now = Date.now();
+  const startMs = banner.startAt?.toMillis?.() ?? null;
+  const endMs   = banner.endAt?.toMillis?.()   ?? null;
+  if (endMs && now > endMs)   return 'expired';
+  if (startMs && now < startMs) return 'scheduled';
+  return 'active';
+}
+
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  active:    { label: '● Live',      cls: 'bg-green-100 text-green-700' },
+  scheduled: { label: '⏰ Scheduled', cls: 'bg-blue-100 text-blue-700' },
+  expired:   { label: '✕ Expired',   cls: 'bg-red-100 text-red-600' },
+  inactive:  { label: '◌ Hidden',    cls: 'bg-gray-100 text-gray-500' },
 };
 
+type FormData = {
+  title: string; subtitle: string; code: string;
+  emoji: string; gradient: string; order: string;
+  startAt: string; endAt: string;
+};
+
+// ── Sortable banner row ───────────────────────────────────────────────────────
+
+function SortableBannerRow({
+  banner, analytics, onEdit, onDelete, onToggle,
+}: {
+  banner: Banner;
+  analytics: BannerAnalytics | undefined;
+  onEdit: (b: Banner) => void;
+  onDelete: (b: Banner) => void;
+  onToggle: (b: Banner) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: banner.id });
+  const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 50 : undefined };
+  const status = getBannerStatus(banner);
+  const { label, cls } = STATUS_BADGE[status];
+  const convRate = analytics && analytics.totalClicks > 0
+    ? ((analytics.totalConversions / analytics.totalClicks) * 100).toFixed(1)
+    : '0.0';
+
+  return (
+    <motion.div
+      ref={setNodeRef}
+      style={style}
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: isDragging ? 0.85 : 1, y: 0, scale: isDragging ? 1.02 : 1 }}
+      className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-4 ${isDragging ? 'shadow-xl' : ''}`}
+    >
+      <div className="flex items-center gap-3">
+        {/* Drag handle */}
+        <button {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing p-1 text-gray-300 hover:text-gray-500 touch-none">
+          <GripVertical className="w-4 h-4" />
+        </button>
+
+        {/* Preview */}
+        <div className={`w-12 h-12 bg-gradient-to-br ${banner.gradient} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}>
+          {banner.emoji}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-black text-gray-900 text-sm truncate">{banner.title}</p>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>
+            {banner.code && <span className="text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-full">{banner.code}</span>}
+          </div>
+          <p className="text-xs text-gray-500 truncate">{banner.subtitle}</p>
+          {/* Analytics row */}
+          {analytics && (
+            <div className="flex items-center gap-3 mt-1">
+              <span className="flex items-center gap-1 text-[10px] text-gray-400 font-bold">
+                <MousePointer className="w-3 h-3" /> {analytics.totalClicks} clicks
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-gray-400 font-bold">
+                <ShoppingBag className="w-3 h-3" /> {analytics.totalConversions} orders
+              </span>
+              <span className="text-[10px] font-black text-brand">{convRate}% CVR</span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button onClick={() => onToggle(banner)} className="p-2 text-gray-400 hover:text-brand transition-colors" title={banner.isActive ? 'Deactivate' : 'Activate'}>
+            {banner.isActive ? <ToggleRight className="w-5 h-5 text-brand" /> : <ToggleLeft className="w-5 h-5" />}
+          </button>
+          <button onClick={() => onEdit(banner)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors">
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button onClick={() => onDelete(banner)} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Schedule info */}
+      {(banner.startAt || banner.endAt) && (
+        <div className="mt-2 ml-11 flex items-center gap-3 text-[11px] text-gray-400">
+          {banner.startAt && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Starts: {banner.startAt.toDate().toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+          {banner.endAt   && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Ends: {banner.endAt.toDate().toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+
 export default function Banners() {
-  const [banners, setBanners] = useState<Banner[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [banners, setBanners]     = useState<Banner[]>([]);
+  const [analytics, setAnalytics] = useState<Record<string, BannerAnalytics>>({});
+  const [loading, setLoading]     = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<Banner | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<FormData>({
-    defaultValues: { gradient: GRADIENT_OPTIONS[0].value, emoji: '🎉', order: '0' },
+    defaultValues: { gradient: GRADIENT_OPTIONS[0].value, emoji: '🎉', order: '0', startAt: '', endAt: '' },
   });
 
   const watchGradient = watch('gradient');
-  const watchEmoji = watch('emoji');
-  const watchTitle = watch('title');
+  const watchEmoji    = watch('emoji');
+  const watchTitle    = watch('title');
   const watchSubtitle = watch('subtitle');
-  const watchCode = watch('code');
+  const watchCode     = watch('code');
 
+  // Banners listener
   useEffect(() => {
     const q = query(collection(db, 'banners'), orderBy('order', 'asc'));
-    const unsub = onSnapshot(q, snap => {
+    return onSnapshot(q, snap => {
       setBanners(snap.docs.map(d => ({ id: d.id, ...d.data() } as Banner)));
       setLoading(false);
     }, () => { toast.error('Failed to load banners'); setLoading(false); });
-    return () => unsub();
   }, []);
+
+  // Analytics listener
+  useEffect(() => {
+    return onSnapshot(collection(db, 'bannerAnalytics'), snap => {
+      const map: Record<string, BannerAnalytics> = {};
+      snap.docs.forEach(d => { map[d.id] = d.data() as BannerAnalytics; });
+      setAnalytics(map);
+    }, () => {});
+  }, []);
+
+  const toTimestamp = (val: string) => val ? Timestamp.fromDate(new Date(val)) : null;
+  const toDatetimeLocal = (ts?: Timestamp | null) => {
+    if (!ts) return '';
+    const d = ts.toDate();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
 
   const openAdd = () => {
     setEditTarget(null);
-    reset({ title: '', subtitle: '', code: '', emoji: '🎉', gradient: GRADIENT_OPTIONS[0].value, order: String(banners.length) });
+    reset({ title: '', subtitle: '', code: '', emoji: '🎉', gradient: GRADIENT_OPTIONS[0].value, order: String(banners.length), startAt: '', endAt: '' });
     setShowModal(true);
   };
 
   const openEdit = (b: Banner) => {
     setEditTarget(b);
-    reset({ title: b.title, subtitle: b.subtitle, code: b.code || '', emoji: b.emoji, gradient: b.gradient, order: String(b.order) });
+    reset({
+      title: b.title, subtitle: b.subtitle, code: b.code || '', emoji: b.emoji,
+      gradient: b.gradient, order: String(b.order),
+      startAt: toDatetimeLocal(b.startAt), endAt: toDatetimeLocal(b.endAt),
+    });
     setShowModal(true);
   };
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const payload = {
-        title: data.title.trim(),
-        subtitle: data.subtitle.trim(),
-        code: data.code.trim().toUpperCase(),
-        emoji: data.emoji,
-        gradient: data.gradient,
-        order: parseInt(data.order) || 0,
+      const payload: any = {
+        title: data.title.trim(), subtitle: data.subtitle.trim(),
+        code: data.code.trim().toUpperCase(), emoji: data.emoji,
+        gradient: data.gradient, order: parseInt(data.order) || 0,
         isActive: editTarget?.isActive ?? true,
+        startAt: toTimestamp(data.startAt),
+        endAt:   toTimestamp(data.endAt),
       };
       if (editTarget) {
         await updateDoc(doc(db, 'banners', editTarget.id), payload);
@@ -99,108 +239,100 @@ export default function Banners() {
         toast.success('Banner created!');
       }
       setShowModal(false);
-    } catch {
-      toast.error('Failed to save banner');
-    } finally {
-      setIsSubmitting(false);
-    }
+    } catch { toast.error('Failed to save banner'); }
+    finally { setIsSubmitting(false); }
   };
 
-  const toggleActive = async (b: Banner) => {
-    try {
-      await updateDoc(doc(db, 'banners', b.id), { isActive: !b.isActive });
-      toast.success(b.isActive ? 'Banner hidden' : 'Banner shown');
-    } catch {
-      toast.error('Failed to update banner');
-    }
-  };
-
-  const deleteBanner = async (b: Banner) => {
+  const toggleActive  = async (b: Banner) => { await updateDoc(doc(db, 'banners', b.id), { isActive: !b.isActive }); };
+  const deleteBanner  = async (b: Banner) => {
     if (!confirm(`Delete "${b.title}"?`)) return;
-    try {
-      await deleteDoc(doc(db, 'banners', b.id));
-      toast.success('Banner deleted');
-    } catch {
-      toast.error('Failed to delete banner');
-    }
+    await deleteDoc(doc(db, 'banners', b.id));
+    toast.success('Banner deleted');
   };
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = banners.findIndex(b => b.id === active.id);
+    const newIdx = banners.findIndex(b => b.id === over.id);
+    const reordered = arrayMove(banners, oldIdx, newIdx);
+    setBanners(reordered);
+    const batch = writeBatch(db);
+    reordered.forEach((b, i) => batch.update(doc(db, 'banners', b.id), { order: i }));
+    await batch.commit();
+    toast.success('Order saved');
+  }, [banners]);
+
+  // Summary analytics
+  const totalClicks = Object.values(analytics).reduce((s, a) => s + (a.totalClicks ?? 0), 0);
+  const totalConversions = Object.values(analytics).reduce((s, a) => s + (a.totalConversions ?? 0), 0);
+  const overallCVR = totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(1) : '0.0';
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <motion.div
-        className="flex items-center justify-between mb-6"
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      {/* Header */}
+      <motion.div className="flex items-center justify-between mb-6" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}>
         <div>
           <h1 className="text-2xl font-black text-gray-900">Offer Banners</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Banners shown in the home page carousel</p>
+          <p className="text-sm text-gray-500 mt-0.5">Drag to reorder · Schedule · Track performance</p>
         </div>
-        <motion.button
-          whileHover={{ scale: 1.03 }}
-          whileTap={{ scale: 0.97 }}
-          onClick={openAdd}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> Add Banner
-        </motion.button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowAnalytics(!showAnalytics)}
+            className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${showAnalytics ? 'bg-brand text-white border-brand' : 'border-gray-200 text-gray-600 hover:border-brand hover:text-brand'}`}>
+            <BarChart2 className="w-4 h-4" /> Analytics
+          </button>
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2"><Plus className="w-4 h-4" /> Add Banner</button>
+        </div>
       </motion.div>
 
+      {/* Analytics summary */}
+      <AnimatePresence>
+        {showAnalytics && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mb-5">
+            <div className="grid grid-cols-3 gap-3 mb-2">
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center">
+                <p className="text-2xl font-black text-gray-900">{totalClicks.toLocaleString()}</p>
+                <p className="text-xs text-gray-400 font-bold mt-0.5 flex items-center justify-center gap-1"><MousePointer className="w-3 h-3" />Total Clicks</p>
+              </div>
+              <div className="bg-white rounded-2xl border border-gray-100 p-4 text-center">
+                <p className="text-2xl font-black text-gray-900">{totalConversions.toLocaleString()}</p>
+                <p className="text-xs text-gray-400 font-bold mt-0.5 flex items-center justify-center gap-1"><ShoppingBag className="w-3 h-3" />Conversions</p>
+              </div>
+              <div className="bg-brand/5 rounded-2xl border border-brand/20 p-4 text-center">
+                <p className="text-2xl font-black text-brand">{overallCVR}%</p>
+                <p className="text-xs text-gray-400 font-bold mt-0.5">Overall CVR</p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {loading ? (
-        <div className="space-y-3">
-          {[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
-        </div>
+        <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}</div>
       ) : banners.length === 0 ? (
         <div className="text-center py-20">
           <div className="text-6xl mb-4">🎨</div>
           <h3 className="text-lg font-black text-gray-700">No banners yet</h3>
-          <p className="text-sm text-gray-400 mt-1">Add your first offer banner to show on the home screen</p>
           <button onClick={openAdd} className="btn-primary mt-4">Add Banner</button>
         </div>
       ) : (
-        <div className="space-y-3">
-          {banners.map((b, i) => (
-            <motion.div
-              key={b.id}
-              layout
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06, duration: 0.28 }}
-              whileHover={{ scale: 1.01, boxShadow: '0 6px 20px rgba(0,0,0,0.07)' }}
-              className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4"
-            >
-              {/* Preview */}
-              <div className={`w-14 h-14 bg-gradient-to-br ${b.gradient} rounded-2xl flex items-center justify-center text-2xl flex-shrink-0`}>
-                {b.emoji}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-black text-gray-900 text-sm truncate">{b.title}</p>
-                  {!b.isActive && <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">Hidden</span>}
-                </div>
-                <p className="text-xs text-gray-500 truncate">{b.subtitle}</p>
-                {b.code && <span className="text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-full mt-0.5 inline-block">{b.code}</span>}
-              </div>
-
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button onClick={() => toggleActive(b)} className="p-2 text-gray-400 hover:text-brand transition-colors" title={b.isActive ? 'Hide' : 'Show'}>
-                  {b.isActive ? <ToggleRight className="w-5 h-5 text-brand" /> : <ToggleLeft className="w-5 h-5" />}
-                </button>
-                <button onClick={() => openEdit(b)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={() => deleteBanner(b)} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={banners.map(b => b.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3">
+              {banners.map(b => (
+                <SortableBannerRow
+                  key={b.id} banner={b}
+                  analytics={showAnalytics ? analytics[b.id] : undefined}
+                  onEdit={openEdit} onDelete={deleteBanner} onToggle={toggleActive}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       )}
 
-      {/* Modal */}
+      {/* Modal / slide-over */}
       <AnimatePresence>
         {showModal && (
           <>
@@ -213,76 +345,69 @@ export default function Banners() {
             >
               <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
                 <h2 className="text-lg font-black text-gray-800">{editTarget ? 'Edit Banner' : 'New Banner'}</h2>
-                <button onClick={() => setShowModal(false)} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                  <X className="w-4 h-4" />
-                </button>
+                <button onClick={() => setShowModal(false)} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><X className="w-4 h-4" /></button>
               </div>
-
               <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-5">
                 {/* Live preview */}
                 <div className={`h-28 bg-gradient-to-br ${watchGradient} rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden`}>
                   <span className="absolute -right-3 -bottom-3 text-7xl opacity-20 rotate-12">{watchEmoji}</span>
                   <p className="text-white text-[10px] font-black uppercase tracking-widest opacity-80">{watchSubtitle || 'Subtitle'}</p>
                   <p className="text-white text-xl font-black">{watchTitle || 'Offer Title'}</p>
-                  {watchCode && (
-                    <span className="text-[9px] font-black text-white/80 border border-dashed border-white/50 px-2 py-0.5 rounded w-fit">
-                      {watchCode}
-                    </span>
-                  )}
+                  {watchCode && <span className="text-[9px] font-black text-white/80 border border-dashed border-white/50 px-2 py-0.5 rounded w-fit">{watchCode}</span>}
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Offer Title *</label>
-                  <input {...register('title', { required: true })}
-                    placeholder="50% OFF up to ₹100"
-                    className={`input-field ${errors.title ? 'border-red-400' : ''}`} />
+                  <input {...register('title', { required: true })} placeholder="50% OFF up to ₹100" className={`input-field ${errors.title ? 'border-red-400' : ''}`} />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Subtitle *</label>
-                  <input {...register('subtitle', { required: true })}
-                    placeholder="First order special"
-                    className={`input-field ${errors.subtitle ? 'border-red-400' : ''}`} />
+                  <input {...register('subtitle', { required: true })} placeholder="First order special" className={`input-field ${errors.subtitle ? 'border-red-400' : ''}`} />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Coupon Code (optional)</label>
                   <input {...register('code')} placeholder="NEWUSER50" className="input-field" />
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Emoji</label>
                   <div className="flex gap-2 flex-wrap">
                     {EMOJI_OPTIONS.map(e => (
-                      <button key={e} type="button"
-                        onClick={() => setValue('emoji', e)}
+                      <button key={e} type="button" onClick={() => setValue('emoji', e)}
                         className={`w-10 h-10 text-xl rounded-xl border-2 transition-all ${watchEmoji === e ? 'border-brand bg-brand/10' : 'border-gray-100 hover:border-gray-300'}`}
                       >{e}</button>
                     ))}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Color</label>
                   <div className="grid grid-cols-3 gap-2">
                     {GRADIENT_OPTIONS.map(g => (
-                      <button key={g.value} type="button"
-                        onClick={() => setValue('gradient', g.value)}
+                      <button key={g.value} type="button" onClick={() => setValue('gradient', g.value)}
                         className={`h-10 bg-gradient-to-r ${g.value} rounded-xl border-2 transition-all ${watchGradient === g.value ? 'border-gray-900 scale-105' : 'border-transparent'}`}
                       />
                     ))}
                   </div>
                 </div>
-
+                {/* Schedule */}
+                <div className="bg-blue-50 rounded-2xl p-4 space-y-3">
+                  <p className="text-xs font-black text-blue-700 uppercase tracking-wider flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Schedule (optional)</p>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Go Live At</label>
+                    <input {...register('startAt')} type="datetime-local" className="input-field text-sm" />
+                    <p className="text-xs text-gray-400 mt-1">Leave empty to go live immediately when active</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1">Expire At</label>
+                    <input {...register('endAt')} type="datetime-local" className="input-field text-sm" />
+                    <p className="text-xs text-gray-400 mt-1">Leave empty to never expire</p>
+                  </div>
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Display Order</label>
                   <input {...register('order')} type="number" min="0" placeholder="0" className="input-field" />
-                  <p className="text-xs text-gray-400 mt-1">Lower number = shown first</p>
+                  <p className="text-xs text-gray-400 mt-1">Drag to reorder from the list instead</p>
                 </div>
-
-                <button type="submit" disabled={isSubmitting}
-                  className="btn-primary w-full disabled:opacity-60 flex items-center justify-center gap-2">
-                  {isSubmitting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : editTarget ? 'Save Changes' : 'Create Banner'}
+                <button type="submit" disabled={isSubmitting} className="btn-primary w-full disabled:opacity-60 flex items-center justify-center gap-2">
+                  {isSubmitting ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</> : editTarget ? 'Save Changes' : 'Create Banner'}
                 </button>
               </form>
             </motion.div>

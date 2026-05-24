@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { signInWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { motion } from 'framer-motion';
-import { Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
+import { motion } from 'motion/react';
+import { Mail, Lock, LogIn, AlertCircle, Smartphone } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -14,6 +14,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
+  const [step, setStep] = useState<'credentials' | 'otp'>('credentials');
+  const [otpInput, setOtpInput] = useState('');
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [pendingUser, setPendingUser] = useState<User | null>(null);
 
   const verifyAdmin = async (uid: string, email: string | null) => {
     const ADMIN_PHONE = '6300752250';
@@ -59,6 +63,48 @@ export default function Login() {
     return false;
   };
 
+  const sendOTP = async (user: User) => {
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    await setDoc(doc(db, 'adminOTPs', user.uid), {
+      code: otp,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+    toast.success('OTP sent: ' + otp + ' (valid 10 min)', { duration: 15000 });
+    setPendingUser(user);
+    setStep('otp');
+  };
+
+  const verifyOTP = async () => {
+    if (!pendingUser || otpInput.length !== 6) return;
+    setOtpVerifying(true);
+    try {
+      const otpDoc = await getDoc(doc(db, 'adminOTPs', pendingUser.uid));
+      if (!otpDoc.exists()) {
+        setError('OTP expired. Please login again.');
+        setStep('credentials');
+        return;
+      }
+      const data = otpDoc.data();
+      if (Date.now() > data.expiresAt) {
+        setError('OTP expired. Please login again.');
+        setStep('credentials');
+        return;
+      }
+      if (data.code !== otpInput) {
+        setError('Incorrect OTP. Try again.');
+        return;
+      }
+      await deleteDoc(doc(db, 'adminOTPs', pendingUser.uid));
+      toast.success('Welcome back! 🎉');
+      navigate('/admin/analytics');
+    } catch {
+      setError('Verification failed. Please try again.');
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -71,8 +117,7 @@ export default function Login() {
         setError('Access denied. This account does not have admin privileges.');
         return;
       }
-      toast.success('Welcome back!');
-      navigate('/admin/analytics');
+      await sendOTP(user);
     } catch (err: any) {
       const msg: Record<string, string> = {
         'auth/invalid-email': 'Invalid email address.',
@@ -99,8 +144,7 @@ export default function Login() {
         setError('Access denied. This Google account does not have admin privileges.');
         return;
       }
-      toast.success('Welcome back!');
-      navigate('/admin/analytics');
+      await sendOTP(user);
     } catch (err: any) {
       if (err.code !== 'auth/popup-closed-by-user') {
         setError(err.message ?? 'Google sign-in failed.');
@@ -164,6 +208,73 @@ export default function Login() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.15, ease: 'easeOut' }}
         >
+          {step === 'otp' ? (
+            /* ── OTP Step ── */
+            <div>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center">
+                  <Smartphone className="w-5 h-5 text-brand" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">2-Factor Verification</h2>
+                  <p className="text-xs text-gray-500">Enter the OTP sent to your device</p>
+                </div>
+              </div>
+
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-5 text-sm"
+                >
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  {error}
+                </motion.div>
+              )}
+
+              <div className="mb-5">
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">6-Digit OTP</label>
+                <input
+                  type="number"
+                  maxLength={6}
+                  value={otpInput}
+                  onChange={e => { setError(''); setOtpInput(e.target.value.slice(0, 6)); }}
+                  className="input-field text-center text-2xl font-black tracking-widest"
+                  placeholder="000000"
+                  autoFocus
+                />
+              </div>
+
+              <motion.button
+                type="button"
+                onClick={verifyOTP}
+                disabled={otpVerifying || otpInput.length !== 6}
+                whileTap={{ scale: 0.98 }}
+                className="btn-primary w-full py-3 text-base disabled:opacity-60 disabled:cursor-not-allowed mb-3"
+              >
+                {otpVerifying ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Verifying...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <Smartphone className="w-4 h-4" /> Verify OTP
+                  </span>
+                )}
+              </motion.button>
+
+              <button
+                type="button"
+                onClick={() => { setStep('credentials'); setOtpInput(''); setError(''); auth.signOut(); }}
+                className="w-full text-center text-sm text-gray-400 hover:text-brand transition-colors"
+              >
+                ← Back to Login
+              </button>
+            </div>
+          ) : (
+            /* ── Credentials Step ── */
+            <div>
           <h2 className="text-xl font-bold text-gray-800 mb-6">Sign in to continue</h2>
 
           {/* Error Banner */}
@@ -259,6 +370,8 @@ export default function Login() {
             )}
             Sign in with Google
           </button>
+            </div>
+          )}
         </motion.div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
