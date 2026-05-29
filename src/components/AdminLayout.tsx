@@ -12,7 +12,7 @@ import { signOut } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDoc, doc } from 'firebase/firestore';
 import ChatDrawer from './ChatDrawer';
 
 const BASE_NAV = [
@@ -54,6 +54,13 @@ const BASE_NAV = [
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
 
+// Sidebar items franchise owners can see (city-scoped)
+const FRANCHISE_NAV_KEYS = [
+  '/admin/analytics', '/admin/orders', '/admin/restaurants',
+  '/admin/riders', '/admin/rider-performance', '/admin/settlements',
+  '/admin/commission', '/admin/refunds', '/admin/franchises',
+];
+
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -61,6 +68,23 @@ export default function AdminLayout() {
   const { theme, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // Sub-admin / franchise role detection
+  const [subAdminRole, setSubAdminRole] = useState<string | null>(null);
+  const [subAdminCity, setSubAdminCity] = useState<string>('');
+  const [subAdminPerms, setSubAdminPerms] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    getDoc(doc(db, 'adminUsers', user.uid)).then(snap => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setSubAdminRole(d.role ?? null);
+        setSubAdminCity(d.city ?? '');
+        setSubAdminPerms(d.permissions ?? null);
+      }
+    }).catch(() => {});
+  }, [user?.uid]);
   const [chatOpen, setChatOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [pendingRiders, setPendingRiders]       = useState(0);
@@ -170,7 +194,28 @@ export default function AdminLayout() {
   const adminEmail = user?.email ?? '';
   const adminInitial = adminName.charAt(0).toUpperCase();
 
-  const NAV_ITEMS = BASE_NAV;
+  // Filter sidebar by role
+  const NAV_ITEMS = (() => {
+    if (subAdminRole === 'franchise') {
+      return BASE_NAV.filter(item => FRANCHISE_NAV_KEYS.includes(item.path));
+    }
+    if (subAdminRole === 'support' && subAdminPerms) {
+      const allowed = new Set(subAdminPerms);
+      return BASE_NAV.filter(item => {
+        const key = item.path.replace('/admin/', '');
+        return key === 'analytics' || allowed.has(key);
+      });
+    }
+    if (subAdminRole === 'finance' && subAdminPerms) {
+      const allowed = new Set(subAdminPerms);
+      return BASE_NAV.filter(item => {
+        const key = item.path.replace('/admin/', '');
+        return key === 'analytics' || allowed.has(key);
+      });
+    }
+    return BASE_NAV; // super admin sees everything
+  })();
+
   const activeNav = NAV_ITEMS.find(item => location.pathname.startsWith(item.path));
 
   return (
@@ -326,7 +371,13 @@ export default function AdminLayout() {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">{adminName}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-400 truncate">{adminEmail}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-400 truncate">
+                {subAdminRole === 'franchise' && subAdminCity
+                  ? `🏙️ ${subAdminCity} Franchise`
+                  : subAdminRole
+                  ? `${subAdminRole.charAt(0).toUpperCase() + subAdminRole.slice(1)} Admin`
+                  : adminEmail}
+              </p>
             </div>
           </div>
           <button
@@ -352,6 +403,12 @@ export default function AdminLayout() {
               {new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
           </div>
+          {subAdminRole === 'franchise' && subAdminCity && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 border border-purple-200 rounded-xl">
+              <Building2 className="w-3.5 h-3.5 text-purple-600" />
+              <span className="text-xs font-black text-purple-700">{subAdminCity} Franchise</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
             <button onClick={toggleTheme} className="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" title="Toggle dark mode">
               {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}

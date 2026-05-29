@@ -13,12 +13,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import {
   Shield, UserPlus, Trash2, Key, Check, X, Eye, EyeOff,
-  ShoppingBag, RefreshCw, Star, DollarSign, Users, Edit2,
+  ShoppingBag, RefreshCw, Star, DollarSign, Users, Edit2, Building2, MapPin,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type SubAdminRole = 'support' | 'finance';
+type SubAdminRole = 'support' | 'finance' | 'franchise';
 
 interface RoleSchema {
   uid: string;
@@ -26,6 +26,8 @@ interface RoleSchema {
   name: string;
   role: SubAdminRole;
   permissions: string[];
+  city?: string;       // franchise owners are scoped to a city
+  phone?: string;
   createdAt?: Timestamp;
   createdBy?: string;
   active: boolean;
@@ -51,6 +53,13 @@ const ROLE_CONFIG: Record<SubAdminRole, {
     color: 'text-green-700 bg-green-100',
     icon: <DollarSign className="w-4 h-4" />,
     permissions: ['payouts', 'settlements', 'commission', 'razorpay', 'refunds'],
+  },
+  franchise: {
+    label: 'Franchise',
+    desc: 'City-scoped access — analytics, orders, restaurants, riders, settlements for their city only',
+    color: 'text-purple-700 bg-purple-100',
+    icon: <Building2 className="w-4 h-4" />,
+    permissions: ['analytics', 'orders', 'restaurants', 'riders', 'settlements', 'commission', 'refunds', 'rider-performance'],
   },
 };
 
@@ -91,6 +100,8 @@ export default function SubAdminManagement() {
   // Form state
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
+  const [formPhone, setFormPhone] = useState('');
+  const [formCity, setFormCity] = useState('');
   const [formRole, setFormRole] = useState<SubAdminRole>('support');
   const [formPerms, setFormPerms] = useState<string[]>(ROLE_CONFIG.support.permissions);
   const [formPassword, setFormPassword] = useState(generatePassword());
@@ -109,8 +120,7 @@ export default function SubAdminManagement() {
 
   function openAdd() {
     setEditTarget(null);
-    setFormName('');
-    setFormEmail('');
+    setFormName(''); setFormEmail(''); setFormPhone(''); setFormCity('');
     setFormRole('support');
     setFormPerms([...ROLE_CONFIG.support.permissions]);
     setFormPassword(generatePassword());
@@ -120,8 +130,8 @@ export default function SubAdminManagement() {
 
   function openEdit(sa: RoleSchema) {
     setEditTarget(sa);
-    setFormName(sa.name);
-    setFormEmail(sa.email);
+    setFormName(sa.name); setFormEmail(sa.email);
+    setFormPhone(sa.phone ?? ''); setFormCity(sa.city ?? '');
     setFormRole(sa.role);
     setFormPerms([...sa.permissions]);
     setFormPassword('');
@@ -143,19 +153,31 @@ export default function SubAdminManagement() {
       toast.error('Name and email are required');
       return;
     }
+    if (formRole === 'franchise' && !formCity.trim()) {
+      toast.error('City is required for franchise accounts');
+      return;
+    }
     setSaving(true);
     try {
+      const extraFields = formRole === 'franchise'
+        ? { city: formCity.trim(), phone: formPhone.trim() }
+        : {};
+
       if (editTarget) {
-        // Update existing
         await updateDoc(doc(db, 'subAdmins', editTarget.uid), {
           name: formName.trim(),
           role: formRole,
           permissions: formPerms,
+          ...extraFields,
           updatedAt: serverTimestamp(),
         });
-        toast.success('Sub-admin updated');
+        await updateDoc(doc(db, 'adminUsers', editTarget.uid), {
+          role: formRole,
+          permissions: formPerms,
+          ...extraFields,
+        }).catch(() => {});
+        toast.success('Account updated');
       } else {
-        // Create new Firebase Auth user via secondaryAuth to avoid logging out main admin
         const cred = await createUserWithEmailAndPassword(secondaryAuth, formEmail.trim(), formPassword);
         await secondaryAuth.signOut();
         await setDoc(doc(db, 'subAdmins', cred.user.uid), {
@@ -165,17 +187,19 @@ export default function SubAdminManagement() {
           role: formRole,
           permissions: formPerms,
           active: true,
+          ...extraFields,
           createdAt: serverTimestamp(),
           createdBy: user?.email ?? 'admin',
         });
-        // Also mark in users collection for auth guard
         await setDoc(doc(db, 'adminUsers', cred.user.uid), {
           email: formEmail.trim(),
           role: formRole,
           isSubAdmin: true,
           permissions: formPerms,
+          ...extraFields,
         });
-        toast.success(`Sub-admin created — ${formEmail}`);
+        const roleLabel = formRole === 'franchise' ? `Franchise (${formCity})` : formRole;
+        toast.success(`${roleLabel} account created — ${formEmail}\nPassword: ${formPassword}`);
       }
       setShowAddModal(false);
     } catch (e: any) {
@@ -309,9 +333,16 @@ export default function SubAdminManagement() {
                       </td>
                       <td className="table-cell text-gray-500">{sa.email}</td>
                       <td className="table-cell">
-                        <span className={`flex items-center gap-1.5 w-fit px-2.5 py-0.5 rounded-full text-xs font-black ${cfg.color}`}>
-                          {cfg.icon}{cfg.label}
-                        </span>
+                        <div className="space-y-1">
+                          <span className={`flex items-center gap-1.5 w-fit px-2.5 py-0.5 rounded-full text-xs font-black ${cfg.color}`}>
+                            {cfg.icon}{cfg.label}
+                          </span>
+                          {sa.role === 'franchise' && sa.city && (
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full w-fit">
+                              <MapPin className="w-2.5 h-2.5" />{sa.city}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="table-cell">
                         <div className="flex flex-wrap gap-1">
@@ -421,6 +452,42 @@ export default function SubAdminManagement() {
                     className="w-full px-4 py-2.5 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                   />
                 </div>
+
+                {/* City + Phone (franchise only) */}
+                {formRole === 'franchise' && (
+                  <div className="grid grid-cols-2 gap-3 bg-purple-50 border border-purple-200 rounded-2xl p-4">
+                    <div className="col-span-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Building2 className="w-4 h-4 text-purple-600" />
+                        <p className="text-xs font-black text-purple-700 uppercase tracking-wider">Franchise Details</p>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">City *</label>
+                      <input
+                        value={formCity}
+                        onChange={e => setFormCity(e.target.value)}
+                        placeholder="e.g. Warangal"
+                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">Phone</label>
+                      <input
+                        value={formPhone}
+                        onChange={e => setFormPhone(e.target.value)}
+                        placeholder="10-digit number"
+                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-purple-600 font-medium">
+                        <MapPin className="w-3 h-3 inline mr-1" />
+                        This franchise owner will only see data for <strong>{formCity || 'their city'}</strong>
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Password (only on create) */}
                 {!editTarget && (
