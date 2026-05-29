@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, Legend, AreaChart, Area,
 } from 'recharts';
-import { TrendingUp, DollarSign, ShoppingBag, Users, Store, Bike, Award, RefreshCw, Download, FileText } from 'lucide-react';
+import { TrendingUp, DollarSign, ShoppingBag, Users, Store, Bike, Award, RefreshCw, Download, FileText, Clock, Repeat2, Tag, UtensilsCrossed } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // ── CSV helper ────────────────────────────────────────────────────────────────
@@ -35,6 +35,10 @@ interface KPIs {
 
 interface TopRestaurant { id: string; name: string; orders: number; earnings: number; rating: number; }
 interface TopRider { uid: string; name: string; deliveries: number; earnings: number; }
+interface PeriodRevenue { today: number; thisWeek: number; thisMonth: number; thisYear: number; }
+interface OrderStatusCounts { active: number; pending: number; preparing: number; completed: number; cancelled: number; failed: number; }
+interface TopItem { name: string; count: number; revenue: number; }
+interface PeakHour { hour: string; orders: number; }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -125,6 +129,12 @@ export default function Analytics() {
   });
   const [topRestaurants, setTopRestaurants] = useState<TopRestaurant[]>([]);
   const [topRiders, setTopRiders] = useState<TopRider[]>([]);
+  const [periodRevenue, setPeriodRevenue] = useState<PeriodRevenue>({ today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0 });
+  const [statusCounts, setStatusCounts] = useState<OrderStatusCounts>({ active: 0, pending: 0, preparing: 0, completed: 0, cancelled: 0, failed: 0 });
+  const [topItems, setTopItems] = useState<TopItem[]>([]);
+  const [topCategories, setTopCategories] = useState<TopItem[]>([]);
+  const [peakHours, setPeakHours] = useState<PeakHour[]>([]);
+  const [repeatCustomerRate, setRepeatCustomerRate] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
 
@@ -189,6 +199,77 @@ export default function Analytics() {
       });
       const sortedRiders = Array.from(riderMap.values()).filter(r => r.deliveries > 0).sort((a, b) => b.deliveries - a.deliveries).slice(0, 5);
       setTopRiders(sortedRiders);
+
+      // ── Period Revenue ──────────────────────────────────────────────────────
+      const now2 = new Date();
+      const startOfToday = new Date(now2.getFullYear(), now2.getMonth(), now2.getDate());
+      const startOfWeek  = new Date(now2); startOfWeek.setDate(now2.getDate() - now2.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+      const startOfMonth = new Date(now2.getFullYear(), now2.getMonth(), 1);
+      const startOfYear  = new Date(now2.getFullYear(), 0, 1);
+      const pr: PeriodRevenue = { today: 0, thisWeek: 0, thisMonth: 0, thisYear: 0 };
+      delivered.forEach((o: any) => {
+        const d = o.createdAt?.toDate?.();
+        if (!d) return;
+        const amt = o.totalAmount || 0;
+        if (d >= startOfToday) pr.today    += amt;
+        if (d >= startOfWeek)  pr.thisWeek += amt;
+        if (d >= startOfMonth) pr.thisMonth += amt;
+        if (d >= startOfYear)  pr.thisYear  += amt;
+      });
+      setPeriodRevenue(pr);
+
+      // ── Order Status Counts ─────────────────────────────────────────────────
+      const sc: OrderStatusCounts = { active: 0, pending: 0, preparing: 0, completed: 0, cancelled: 0, failed: 0 };
+      orders.forEach((o: any) => {
+        const s = (o.status || '').toLowerCase();
+        if (['out_for_delivery', 'rider_assigned', 'picked_up', 'on_the_way'].includes(s)) sc.active++;
+        else if (s === 'pending' || s === 'placed') sc.pending++;
+        else if (['accepted', 'preparing', 'ready'].includes(s)) sc.preparing++;
+        else if (s === 'delivered') sc.completed++;
+        else if (s === 'cancelled') sc.cancelled++;
+        else if (s === 'failed') sc.failed++;
+      });
+      setStatusCounts(sc);
+
+      // ── Peak Hours ──────────────────────────────────────────────────────────
+      const hourMap = new Array(24).fill(0);
+      orders.forEach((o: any) => {
+        const d = o.createdAt?.toDate?.();
+        if (d) hourMap[d.getHours()]++;
+      });
+      setPeakHours(hourMap.map((count, h) => ({
+        hour: `${h.toString().padStart(2, '0')}:00`,
+        orders: count,
+      })));
+
+      // ── Most Ordered Items + Categories ────────────────────────────────────
+      const itemMap  = new Map<string, TopItem>();
+      const catMap   = new Map<string, TopItem>();
+      orders.forEach((o: any) => {
+        (o.items || []).forEach((item: any) => {
+          const qty  = item.quantity ?? item.qty ?? 1;
+          const rev  = (item.price ?? 0) * qty;
+          const name = item.name || 'Unknown';
+          const cat  = item.category || 'Other';
+          if (!itemMap.has(name)) itemMap.set(name, { name, count: 0, revenue: 0 });
+          const im = itemMap.get(name)!; im.count += qty; im.revenue += rev;
+          if (!catMap.has(cat)) catMap.set(cat, { name: cat, count: 0, revenue: 0 });
+          const cm = catMap.get(cat)!; cm.count += qty; cm.revenue += rev;
+        });
+      });
+      setTopItems(Array.from(itemMap.values()).sort((a, b) => b.count - a.count).slice(0, 8));
+      setTopCategories(Array.from(catMap.values()).sort((a, b) => b.count - a.count).slice(0, 6));
+
+      // ── Repeat Customer Rate ────────────────────────────────────────────────
+      const customerOrderCount = new Map<string, number>();
+      orders.forEach((o: any) => {
+        if (o.customerId) customerOrderCount.set(o.customerId, (customerOrderCount.get(o.customerId) || 0) + 1);
+      });
+      const totalC   = customerOrderCount.size;
+      const repeatC  = Array.from(customerOrderCount.values()).filter(c => c > 1).length;
+      setRepeatCustomerRate(totalC > 0 ? Math.round((repeatC / totalC) * 100) : 0);
+
     } catch (error) {
       console.error('Failed to fetch analytics', error);
     } finally {
@@ -488,6 +569,191 @@ export default function Analytics() {
           </div>
         </motion.div>
       </div>
+
+      {/* ── Period Revenue ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[
+          { label: "Today's Revenue",   value: periodRevenue.today,     icon: '🌅', color: 'bg-amber-50 text-amber-700' },
+          { label: 'This Week',         value: periodRevenue.thisWeek,  icon: '📅', color: 'bg-blue-50 text-blue-700' },
+          { label: 'This Month',        value: periodRevenue.thisMonth, icon: '📆', color: 'bg-purple-50 text-purple-700' },
+          { label: 'This Year',         value: periodRevenue.thisYear,  icon: '🏆', color: 'bg-green-50 text-green-700' },
+        ].map((c, i) => (
+          <motion.div
+            key={c.label}
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 + 0.2 }}
+            className="bg-white rounded-2xl p-5 shadow-card"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">{c.icon}</span>
+              <span className={`text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${c.color}`}>{c.label}</span>
+            </div>
+            <p className="text-2xl font-black text-gray-800">₹{c.value.toLocaleString('en-IN')}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* ── Order Status Breakdown ──────────────────────────────────────────── */}
+      <motion.div
+        className="bg-white rounded-2xl shadow-card p-6"
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+      >
+        <h3 className="text-lg font-bold text-gray-800 mb-4">Order Status Breakdown</h3>
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+          {[
+            { label: 'Active',     count: statusCounts.active,    emoji: '🚴', bg: 'bg-blue-50',   text: 'text-blue-700' },
+            { label: 'Pending',    count: statusCounts.pending,   emoji: '⏳', bg: 'bg-amber-50',  text: 'text-amber-700' },
+            { label: 'Preparing',  count: statusCounts.preparing, emoji: '👨‍🍳', bg: 'bg-orange-50', text: 'text-orange-700' },
+            { label: 'Completed',  count: statusCounts.completed, emoji: '✅', bg: 'bg-green-50',  text: 'text-green-700' },
+            { label: 'Cancelled',  count: statusCounts.cancelled, emoji: '❌', bg: 'bg-red-50',    text: 'text-red-700' },
+            { label: 'Failed',     count: statusCounts.failed,    emoji: '⚠️', bg: 'bg-gray-50',   text: 'text-gray-700' },
+          ].map(s => (
+            <div key={s.label} className={`${s.bg} rounded-2xl p-4 text-center`}>
+              <div className="text-2xl mb-1">{s.emoji}</div>
+              <p className={`text-2xl font-black ${s.text}`}>{s.count.toLocaleString()}</p>
+              <p className="text-xs font-bold text-gray-500 mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* ── Peak Hours ─────────────────────────────────────────────────────── */}
+      <motion.div
+        className="bg-white p-6 rounded-2xl shadow-card"
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+      >
+        <div className="flex items-center gap-2 mb-5">
+          <Clock className="w-5 h-5 text-brand" />
+          <h3 className="text-lg font-bold text-gray-800">Peak Order Hours</h3>
+          <span className="ml-auto text-xs text-gray-400 font-medium">All time · by hour of day</span>
+        </div>
+        <div className="h-48">
+          <ResponsiveContainer width="100%" height={192}>
+            <BarChart data={peakHours} barSize={10}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+              <XAxis dataKey="hour" axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 10 }}
+                tickFormatter={v => {
+                  const h = parseInt(v);
+                  if ([0, 6, 9, 12, 15, 18, 21].includes(h)) return h < 12 ? `${h}am` : h === 12 ? '12pm' : `${h - 12}pm`;
+                  return '';
+                }}
+              />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#9ca3af', fontSize: 11 }} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                formatter={(v: number) => [v, 'Orders']}
+                labelFormatter={(l) => {
+                  const h = parseInt(l);
+                  return h < 12 ? `${h}:00 AM` : h === 12 ? '12:00 PM' : `${h - 12}:00 PM`;
+                }}
+              />
+              <Bar dataKey="orders" radius={[4, 4, 0, 0]}
+                fill="#f97316"
+                label={false}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </motion.div>
+
+      {/* ── Most Ordered Foods + Top Categories ────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <motion.div
+          className="bg-white rounded-2xl shadow-card overflow-hidden"
+          initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }}
+        >
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+            <UtensilsCrossed className="w-5 h-5 text-orange-400" />
+            <h3 className="text-base font-bold text-gray-800">Most Ordered Foods</h3>
+            <span className="ml-auto text-xs text-gray-400">by quantity</span>
+          </div>
+          {topItems.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">No item data yet</div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {topItems.map((item, i) => (
+                <div key={item.name} className="flex items-center gap-3 px-6 py-2.5">
+                  <span className="w-6 h-6 rounded-full bg-orange-50 text-orange-600 text-xs font-black flex items-center justify-center flex-shrink-0">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-800 truncate">{item.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-orange-400 rounded-full" style={{ width: `${Math.round((item.count / (topItems[0]?.count || 1)) * 100)}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-400 font-medium shrink-0">{item.count.toLocaleString()} sold</span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-black text-gray-700 shrink-0">₹{item.revenue.toLocaleString('en-IN')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.div>
+
+        <motion.div
+          className="bg-white rounded-2xl shadow-card overflow-hidden"
+          initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.45 }}
+        >
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
+            <Tag className="w-5 h-5 text-purple-400" />
+            <h3 className="text-base font-bold text-gray-800">Top Categories</h3>
+            <span className="ml-auto text-xs text-gray-400">by quantity</span>
+          </div>
+          {topCategories.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">No category data yet</div>
+          ) : (
+            <div className="p-5 space-y-3">
+              {topCategories.map((cat, i) => {
+                const pct = Math.round((cat.count / (topCategories[0]?.count || 1)) * 100);
+                const colors = ['#f97316', '#3b82f6', '#8b5cf6', '#10b981', '#ef4444', '#f59e0b'];
+                return (
+                  <div key={cat.name}>
+                    <div className="flex justify-between text-sm font-bold text-gray-700 mb-1">
+                      <span>{cat.name}</span>
+                      <span className="text-gray-400">{cat.count.toLocaleString()} items · ₹{cat.revenue.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ delay: 0.5 + i * 0.08, duration: 0.5, ease: 'easeOut' }}
+                        className="h-full rounded-full"
+                        style={{ backgroundColor: colors[i % colors.length] }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
+      </div>
+
+      {/* ── Repeat Customer Rate ────────────────────────────────────────────── */}
+      <motion.div
+        className="bg-white rounded-2xl shadow-card p-6 flex items-center gap-6"
+        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+      >
+        <div className="w-20 h-20 rounded-full bg-brand/10 flex items-center justify-center flex-shrink-0">
+          <Repeat2 className="w-9 h-9 text-brand" />
+        </div>
+        <div className="flex-1">
+          <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">Repeat Customer Rate</p>
+          <p className="text-4xl font-black text-brand">{repeatCustomerRate}%</p>
+          <p className="text-sm text-gray-500 mt-1">of customers have placed more than one order — loyalty indicator</p>
+        </div>
+        <div className="hidden md:block">
+          <div className="w-32 h-32 relative">
+            <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f3f4f6" strokeWidth="3" />
+              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#f97316" strokeWidth="3"
+                strokeDasharray={`${repeatCustomerRate} ${100 - repeatCustomerRate}`}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-lg font-black text-brand">{repeatCustomerRate}%</span>
+            </div>
+          </div>
+        </div>
+      </motion.div>
 
       {/* Leaderboards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

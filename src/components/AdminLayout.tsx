@@ -4,7 +4,7 @@ import {
   BarChart2, DollarSign, Tag, ShieldCheck, CreditCard, Image, Bike,
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
-  ShieldAlert, Ban,
+  ShieldAlert, Ban, Rocket,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -44,6 +44,7 @@ const BASE_NAV = [
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
   { name: 'Fraud Detection',     path: '/admin/fraud',                icon: ShieldAlert },
   { name: 'Blacklist',           path: '/admin/blacklist',            icon: Ban        },
+  { name: 'Verticals Hub',        path: '/admin/verticals',            icon: Rocket     },
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
 

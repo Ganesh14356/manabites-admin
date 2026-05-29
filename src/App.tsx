@@ -35,6 +35,13 @@ import GeoMarketing from './pages/Admin/GeoMarketing';
 import WhatsAppAutomation from './pages/Admin/WhatsAppAutomation';
 import FraudDetection from './pages/Admin/FraudDetection';
 import Blacklist from './pages/Admin/Blacklist';
+import RiderIncentives from './pages/Admin/RiderIncentives';
+import CampaignManager from './pages/Admin/CampaignManager';
+import ReferralDashboard from './pages/Admin/ReferralDashboard';
+import VerticalsHub from './pages/Admin/VerticalsHub';
+import CityManager from './pages/Admin/CityManager';
+import FranchiseManager from './pages/Admin/FranchiseManager';
+import AIInsights from './pages/Admin/AIInsights';
 
 export default function App() {
   return (
@@ -90,8 +97,15 @@ export default function App() {
                 <Route path="sub-admins" element={<SubAdminManagement />} />
                 <Route path="geo-marketing" element={<GeoMarketing />} />
                 <Route path="whatsapp" element={<WhatsAppAutomation />} />
+                <Route path="rider-incentives" element={<RiderIncentives />} />
+                <Route path="campaigns" element={<CampaignManager />} />
+                <Route path="referrals" element={<ReferralDashboard />} />
                 <Route path="fraud" element={<FraudDetection />} />
                 <Route path="blacklist" element={<Blacklist />} />
+                <Route path="verticals" element={<VerticalsHub />} />
+                <Route path="cities" element={<CityManager />} />
+                <Route path="franchises" element={<FranchiseManager />} />
+                <Route path="ai-insights" element={<AIInsights />} />
                 {/* Legacy alias */}
                 <Route path="delivery-settings" element={<Navigate to="/admin/settings" replace />} />
               </Route>

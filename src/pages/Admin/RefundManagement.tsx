@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { OrderId } from '../../components/OrderId';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -41,7 +41,7 @@ interface FraudFlag {
 }
 
 function formatDate(ts: any): string {
-  if (!ts) return 'â€”';
+  if (!ts) return '—';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
@@ -93,9 +93,36 @@ export default function RefundManagement() {
     return list;
   }, [orders, filter, search]);
 
+  // Compute auto-refund preview using the same stage rules as api/auto-refund.js
+  const computeRefundPreview = (order: OrderDoc) => {
+    const STAGE_RULES = [
+      { statuses: ['pending', 'placed'],                                            pct: 100, label: 'Full Refund (before accept)' },
+      { statuses: ['accepted'],                                                     pct: 90,  label: '90% Refund (10% deduction)' },
+      { statuses: ['preparing', 'ready', 'packed'],                                 pct: 60,  label: '60% Refund (40% deduction)' },
+      { statuses: ['picked_up', 'out_for_delivery', 'on_the_way', 'rider_assigned'],pct: 50,  label: '50% Refund (50% deduction)' },
+      { statuses: ['delivered'],                                                     pct: 0,   label: 'No Refund (delivered)' },
+    ];
+    const stage = ((order as any).statusBeforeCancel || order.status || '').toLowerCase();
+    const rule  = STAGE_RULES.find(r => r.statuses.includes(stage)) || STAGE_RULES[0];
+    const total = order.totalAmount || 0;
+    return {
+      pct:       rule.pct,
+      label:     rule.label,
+      amount:    Math.round(total * rule.pct) / 100,
+      deduction: Math.round(total * (100 - rule.pct)) / 100,
+      stage,
+    };
+  };
+
   const openModal = (order: OrderDoc) => {
     setSelected(order);
-    setRefundAmount(String(order.refundAmount ?? order.totalAmount));
+    // Pre-fill with auto-calculated amount if not already set
+    if (order.refundAmount) {
+      setRefundAmount(String(order.refundAmount));
+    } else {
+      const preview = computeRefundPreview(order);
+      setRefundAmount(String(preview.amount));
+    }
     setRefundNote(order.refundNote ?? '');
   };
 
@@ -133,17 +160,17 @@ export default function RefundManagement() {
       const isOriginal = selected.refundMethod === 'original';
       await addDoc(collection(db, 'notifications'), {
         userId:    selected.customerId,
-        title:    'ðŸ’° Refund Issued',
+        title:    '💰 Refund Issued',
         message:  isOriginal
-          ? `â‚¹${amt} refund for order #${selected.id.slice(-6).toUpperCase()} has been processed. It will reflect in 5â€“7 business days to your original payment method.`
-          : `â‚¹${amt} refund for order #${selected.id.slice(-6).toUpperCase()} has been credited to your ManaBites Wallet.`,
+          ? `₹${amt} refund for order #${selected.id.slice(-6).toUpperCase()} has been processed. It will reflect in 5–7 business days to your original payment method.`
+          : `₹${amt} refund for order #${selected.id.slice(-6).toUpperCase()} has been credited to your ManaBites Wallet.`,
         type:     'refund',
         isRead:    false,
         orderId:   selected.id,
         createdAt: serverTimestamp(),
       });
 
-      toast.success(`Refund of â‚¹${amt} issued successfully`);
+      toast.success(`Refund of ₹${amt} issued successfully`);
       setSelected(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to process refund');
@@ -163,7 +190,7 @@ export default function RefundManagement() {
       });
       await addDoc(collection(db, 'notifications'), {
         userId:    selected.customerId,
-        title:    'âŒ Refund Request Rejected',
+        title:    '❌ Refund Request Rejected',
         message:  `Your refund request for order #${selected.id.slice(-6).toUpperCase()} could not be processed. ${refundNote || 'Contact support for details.'}`,
         type:     'refund',
         isRead:    false,
@@ -216,8 +243,8 @@ export default function RefundManagement() {
   };
 
   const statusLabel = (o: OrderDoc) => {
-    if (o.refundStatus === 'wallet_credited') return 'ðŸ’° Wallet';
-    if (o.refundStatus === 'issued') return o.refundMethod === 'original' ? 'ðŸ¦ Issued' : 'âœ“ Issued';
+    if (o.refundStatus === 'wallet_credited') return '💰 Wallet';
+    if (o.refundStatus === 'issued') return o.refundMethod === 'original' ? '🏦 Issued' : '✓ Issued';
     if (o.refundStatus === 'rejected') return 'Rejected';
     return 'Pending';
   };
@@ -252,12 +279,12 @@ export default function RefundManagement() {
           <div className="bg-red-50 border border-red-200 rounded-2xl p-4 space-y-2">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle size={18} className="text-red-600" />
-              <h3 className="font-black text-red-800 text-sm">Food Fraud Alerts — Requires Immediate Action</h3>
+              <h3 className="font-black text-red-800 text-sm">Food Fraud Alerts 🚨 Requires Immediate Action</h3>
             </div>
             {tamperOrders.map(o => (
               <div key={o.id} className="bg-white rounded-xl px-4 py-3 flex items-center justify-between">
                 <div>
-                  <p className="font-bold text-gray-800 text-sm">Order <OrderId id={o.id} className="text-sm" /> — {o.restaurantName}</p>
+                  <p className="font-bold text-gray-800 text-sm">Order <OrderId id={o.id} className="text-sm" /> · {o.restaurantName}</p>
                   <p className="text-xs text-red-600 mt-0.5">{(o as any).refundReason || 'Food tampering / wrong item reported'}</p>
                   {(o as any).riderName && <p className="text-xs text-gray-500">Rider: {(o as any).riderName}</p>}
                 </div>
@@ -269,7 +296,7 @@ export default function RefundManagement() {
                   >
                     {suspendingRider === (o as any).riderId ? (
                       <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : '🚫'} Suspend Rider
+                    ) : '??'} Suspend Rider
                   </button>
                 )}
               </div>
@@ -283,7 +310,7 @@ export default function RefundManagement() {
         {[
           { label: 'Pending', value: orders.filter(o => !o.refundStatus || o.refundStatus === 'pending').length, color: 'text-yellow-600 bg-yellow-50' },
           { label: 'Issued',  value: orders.filter(o => o.refundStatus === 'issued' || o.refundStatus === 'wallet_credited').length, color: 'text-green-600 bg-green-50' },
-          { label: 'Total Refunded', value: `â‚¹${orders.filter(o => o.refundStatus === 'issued' || o.refundStatus === 'wallet_credited').reduce((s, o) => s + (o.refundAmount ?? o.totalAmount ?? 0), 0).toLocaleString()}`, color: 'text-brand bg-brand/10' },
+          { label: 'Total Refunded', value: `₹${orders.filter(o => o.refundStatus === 'issued' || o.refundStatus === 'wallet_credited').reduce((s, o) => s + (o.refundAmount ?? o.totalAmount ?? 0), 0).toLocaleString()}`, color: 'text-brand bg-brand/10' },
         ].map(c => (
           <div key={c.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${c.color}`}>
@@ -302,7 +329,7 @@ export default function RefundManagement() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search order, customerâ€¦"
+            placeholder="Search order, customer…"
             className="w-full pl-9 pr-4 py-2.5 rounded-xl border-2 border-gray-100 focus:border-brand text-sm font-bold outline-none"
           />
         </div>
@@ -344,15 +371,15 @@ export default function RefundManagement() {
                 {filtered.map(order => (
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-4 font-black text-gray-900"><OrderId id={order.id} /></td>
-                    <td className="px-5 py-4 text-gray-700 font-bold">{order.customerName || 'â€”'}</td>
+                    <td className="px-5 py-4 text-gray-700 font-bold">{order.customerName || '—'}</td>
                     <td className="px-5 py-4 text-gray-700 font-bold truncate max-w-[140px]">{order.restaurantName}</td>
-                    <td className="px-5 py-4 font-black text-brand">â‚¹{order.totalAmount}</td>
+                    <td className="px-5 py-4 font-black text-brand">₹{order.totalAmount}</td>
                     <td className="px-5 py-4">
                       {order.refundStatus === 'wallet_credited'
-                        ? <span className="text-xs font-bold text-brand">ðŸ’° Wallet</span>
+                        ? <span className="text-xs font-bold text-brand">💰 Wallet</span>
                         : order.refundMethod === 'original'
-                          ? <span className="text-xs font-bold text-gray-500">ðŸ¦ Original</span>
-                          : <span className="text-xs font-mono text-gray-400">{order.razorpayPaymentId?.slice(-8) || 'â€”'}</span>
+                          ? <span className="text-xs font-bold text-gray-500">🏦 Original</span>
+                          : <span className="text-xs font-mono text-gray-400">{order.razorpayPaymentId?.slice(-8) || '—'}</span>
                       }
                     </td>
                     <td className="px-5 py-4 text-xs text-gray-500">{formatDate(order.createdAt)}</td>
@@ -397,6 +424,45 @@ export default function RefundManagement() {
                 </button>
               </div>
 
+              {/* Auto-calculated refund preview */}
+              {(() => {
+                const preview = computeRefundPreview(selected);
+                const alreadyProcessed = selected.refundStatus === 'issued' || selected.refundStatus === 'wallet_credited';
+                if (alreadyProcessed) return null;
+                return (
+                  <div className={`rounded-xl px-4 py-3 mb-4 border-2 ${preview.pct === 100 ? 'bg-green-50 border-green-200' : preview.pct === 0 ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-black uppercase tracking-widest text-gray-500">Auto-Refund Engine</span>
+                      <span className={`text-xs font-black px-2 py-0.5 rounded-full ${preview.pct === 100 ? 'bg-green-100 text-green-700' : preview.pct === 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                        {preview.pct}% Refund
+                      </span>
+                    </div>
+                    <p className="text-sm font-black text-gray-800">₹{preview.amount} refundable</p>
+                    {preview.deduction > 0 && <p className="text-xs text-red-600 font-bold">₹{preview.deduction} cancellation fee</p>}
+                    <p className="text-xs text-gray-500 mt-0.5">{preview.label} · Stage: <span className="font-bold">{preview.stage || '—'}</span></p>
+                    <button
+                      onClick={async () => {
+                        setSaving(true);
+                        try {
+                          const r = await fetch('/api/auto-refund', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ orderId: selected.id, cancelledBy: 'admin', cancellationReason: selected.refundNote || 'Admin refund' }),
+                          });
+                          const d = await r.json();
+                          if (d.success) { toast.success(`Auto-refund applied: ₹${d.refundAmount} (${d.refundPct}%)`); setSelected(null); }
+                          else toast.error(d.error || 'Auto-refund failed');
+                        } catch { toast.error('Network error'); } finally { setSaving(false); }
+                      }}
+                      disabled={saving || preview.pct === 0}
+                      className="mt-2 w-full py-2 rounded-xl bg-brand text-white text-xs font-black flex items-center justify-center gap-1.5 disabled:opacity-50 hover:bg-brand/90"
+                    >
+                      {saving ? <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : '⚡'}
+                      Apply Auto-Refund (₹{preview.amount})
+                    </button>
+                  </div>
+                );
+              })()}
+
               <div className="bg-gray-50 rounded-xl p-4 mb-5 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 font-bold">Order</span>
@@ -408,7 +474,7 @@ export default function RefundManagement() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 font-bold">Order Total</span>
-                  <span className="font-black text-brand">â‚¹{selected.totalAmount}</span>
+                  <span className="font-black text-brand">₹{selected.totalAmount}</span>
                 </div>
                 {selected.razorpayPaymentId && (
                   <div className="flex justify-between text-sm">
@@ -419,13 +485,13 @@ export default function RefundManagement() {
                 {selected.refundMethod && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 font-bold">Refund To</span>
-                    <span className="font-black">{selected.refundMethod === 'original' ? 'ðŸ¦ Original Payment' : 'ðŸ’° Wallet'}</span>
+                    <span className="font-black">{selected.refundMethod === 'original' ? '🏦 Original Payment' : '💰 Wallet'}</span>
                   </div>
                 )}
                 {selected.cancellationFee != null && selected.cancellationFee > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500 font-bold">Cancellation Fee</span>
-                    <span className="font-black text-red-500">âˆ’â‚¹{selected.cancellationFee}</span>
+                    <span className="font-black text-red-500">−₹{selected.cancellationFee}</span>
                   </div>
                 )}
                 {selected.razorpayRefundId && (
@@ -438,7 +504,7 @@ export default function RefundManagement() {
 
               <div className="space-y-4 mb-5">
                 <div>
-                  <label className="text-xs font-black text-gray-500 uppercase tracking-widest block mb-1.5">Refund Amount (â‚¹)</label>
+                  <label className="text-xs font-black text-gray-500 uppercase tracking-widest block mb-1.5">Refund Amount (₹)</label>
                   <input
                     type="number"
                     value={refundAmount}
@@ -452,7 +518,7 @@ export default function RefundManagement() {
                     value={refundNote}
                     onChange={e => setRefundNote(e.target.value)}
                     rows={2}
-                    placeholder="Reason or transaction IDâ€¦"
+                    placeholder="Reason or transaction ID…"
                     className="w-full rounded-xl border-2 border-gray-100 focus:border-brand px-4 py-3 text-sm font-bold outline-none resize-none"
                   />
                 </div>

@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, getDocs, query, where, Timestamp,
@@ -7,11 +7,21 @@ import {
 import { db } from '../../firebase';
 import {
   Calculator, Store, Bike, CheckCircle, AlertTriangle,
-  ChevronDown, ChevronUp, Download,
+  ChevronDown, ChevronUp, Download, Banknote, CreditCard, FileText,
 } from 'lucide-react';
+
+// ── CSV helper ─────────────────────────────────────────────────────
+function downloadCSV(rows: (string | number)[][], filename: string) {
+  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 import toast from 'react-hot-toast';
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Types ─────────────────────────────────────────────────────────
 interface RestaurantSettlement {
   restaurantId: string;
   restaurantName: string;
@@ -45,23 +55,23 @@ interface Preview {
   totalRiderPay: number;
 }
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const toINR = (n: number) => `â‚¹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+// ── Helpers ───────────────────────────────────────────────────────
+const toINR = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Component ─────────────────────────────────────────────────────
 export default function DailySettlements() {
   const [date, setDate] = useState(todayISO());
   const [calculating, setCalculating] = useState(false);
-  const [generating, setGenerating] = useState(false);
+  const [generating, setGenerating] = useState<'manual' | 'online' | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [expandedRest, setExpandedRest] = useState<string | null>(null);
 
-  // â”€â”€ Calculate settlement from orders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Calculate settlement from orders ────────────────────────────
   const handleCalculate = async () => {
     setCalculating(true);
     setPreview(null);
@@ -87,7 +97,7 @@ export default function DailySettlements() {
       const delivered = allOrders.filter(o => o.status === 'delivered' && !o.settled);
 
       if (delivered.length === 0) {
-        toast('No unsettled delivered orders on this date', { icon: 'â„¹ï¸' });
+        toast('No unsettled delivered orders on this date', { icon: 'ℹ️' });
         setCalculating(false);
         return;
       }
@@ -161,17 +171,17 @@ export default function DailySettlements() {
     }
   };
 
-  // â”€â”€ Generate payout records â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const handleGenerate = async () => {
+  // ── Generate payout records ──────────────────────────────────────
+  const handleGenerate = async (method: 'manual' | 'online') => {
     if (!preview) return;
-    setGenerating(true);
+    setGenerating(method);
     try {
       const batch = writeBatch(db);
+      const isManual = method === 'manual';
+      const now = serverTimestamp();
 
       // Mark all orders as settled
-      const allOrderIds = [
-        ...preview.restaurants.flatMap(r => r.orderIds),
-      ];
+      const allOrderIds = preview.restaurants.flatMap(r => r.orderIds);
       for (const oid of allOrderIds) {
         batch.update(doc(db, 'orders', oid), { settled: true, settledDate: preview.date });
       }
@@ -191,10 +201,12 @@ export default function DailySettlements() {
           ordersCount: r.ordersCount,
           orderIds: r.orderIds,
           settlementDate: preview.date,
-          status: 'pending',
+          paymentMethod: method,
+          status: isManual ? 'completed' : 'pending',
+          ...(isManual ? { paidAt: now, paidVia: 'manual_offline' } : {}),
           periodStart: Timestamp.fromDate(new Date(preview.date + 'T00:00:00')),
           periodEnd:   Timestamp.fromDate(new Date(preview.date + 'T23:59:59')),
-          createdAt: serverTimestamp(),
+          createdAt: now,
         });
       }
 
@@ -210,20 +222,100 @@ export default function DailySettlements() {
           payPerDelivery: r.payPerDelivery,
           orderIds: r.orderIds,
           settlementDate: preview.date,
-          status: 'pending',
+          paymentMethod: method,
+          status: isManual ? 'completed' : 'pending',
+          ...(isManual ? { paidAt: now, paidVia: 'manual_offline' } : {}),
           periodStart: Timestamp.fromDate(new Date(preview.date + 'T00:00:00')),
           periodEnd:   Timestamp.fromDate(new Date(preview.date + 'T23:59:59')),
-          createdAt: serverTimestamp(),
+          createdAt: now,
         });
       }
 
       await batch.commit();
-      toast.success(`Settlement generated â€” ${preview.restaurants.length + preview.riders.length} payouts created`);
+      const total = preview.restaurants.length + preview.riders.length;
+      toast.success(
+        isManual
+          ? `${total} payouts marked as completed (manual / offline)`
+          : `${total} payouts created — pending online transfer`
+      );
       setPreview(null);
     } catch (err: any) {
       toast.error(err.message || 'Failed to generate settlement');
     } finally {
-      setGenerating(false);
+      setGenerating(null);
+    }
+  };
+
+  // ── GST Report ───────────────────────────────────────────────────
+  const [gstMonth, setGstMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [gstLoading, setGstLoading] = useState(false);
+
+  const downloadGSTReport = async () => {
+    setGstLoading(true);
+    try {
+      const [y, m] = gstMonth.split('-').map(Number);
+      const start  = new Date(y, m - 1, 1);
+      const end    = new Date(y, m, 0, 23, 59, 59, 999);
+      const snap   = await getDocs(query(
+        collection(db, 'orders'),
+        where('status', '==', 'delivered'),
+        where('createdAt', '>=', Timestamp.fromDate(start)),
+        where('createdAt', '<=', Timestamp.fromDate(end)),
+      ));
+      const orders = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+      if (orders.length === 0) { toast('No delivered orders in this month', { icon: 'ℹ️' }); setGstLoading(false); return; }
+
+      const GST_RATE    = 0.05; // 5% GST on food (CGST 2.5% + SGST 2.5%)
+      const COMM_GST    = 0.18; // 18% GST on platform commission (service)
+
+      const rows: (string | number)[][] = [
+        [
+          'Order ID', 'Date', 'Restaurant Name', 'Customer Name',
+          'Taxable Value (₹)', 'CGST (2.5%) ₹', 'SGST (2.5%) ₹', 'Total GST ₹', 'Grand Total ₹',
+          'Platform Commission ₹', 'GST on Commission (18%) ₹', 'Payment Method',
+        ],
+      ];
+
+      let totalTaxable = 0, totalCGST = 0, totalSGST = 0, totalComm = 0, totalCommGST = 0;
+
+      for (const o of orders) {
+        const gross       = o.total ?? o.totalAmount ?? 0;
+        const subtotal    = o.subtotal ?? gross;
+        const taxable     = +(subtotal / (1 + GST_RATE)).toFixed(2);
+        const cgst        = +((taxable * GST_RATE) / 2).toFixed(2);
+        const sgst        = cgst;
+        const commission  = +(subtotal * ((o.platformFee ? o.platformFee / subtotal : 0.15))).toFixed(2);
+        const commGST     = +(commission * COMM_GST).toFixed(2);
+        const date        = o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString('en-IN') : '—';
+
+        totalTaxable += taxable; totalCGST += cgst; totalSGST += sgst;
+        totalComm += commission; totalCommGST += commGST;
+
+        rows.push([
+          o.id?.slice(-8).toUpperCase() ?? '—', date,
+          o.restaurantName ?? '—', o.customerName ?? '—',
+          taxable, cgst, sgst, +(cgst + sgst).toFixed(2), gross,
+          commission, commGST, o.paymentMethod ?? '—',
+        ]);
+      }
+
+      // Summary row
+      rows.push(['', '', '', 'TOTAL',
+        +totalTaxable.toFixed(2), +totalCGST.toFixed(2), +totalSGST.toFixed(2),
+        +(totalCGST + totalSGST).toFixed(2), '',
+        +totalComm.toFixed(2), +totalCommGST.toFixed(2), '',
+      ]);
+
+      downloadCSV(rows, `GST-Report-${gstMonth}.csv`);
+      toast.success(`GST Report downloaded for ${gstMonth} (${orders.length} orders)`);
+    } catch (err: any) {
+      toast.error('Failed to generate GST report: ' + err.message);
+    } finally {
+      setGstLoading(false);
     }
   };
 
@@ -237,6 +329,23 @@ export default function DailySettlements() {
         <p className="text-sm text-gray-500 mt-0.5">
           Calculate and generate payouts for delivered orders by date
         </p>
+      </div>
+
+      {/* ── GST Report ──────────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row items-start sm:items-end gap-4">
+        <div>
+          <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">GST Report — Month</label>
+          <input type="month" value={gstMonth} onChange={e => setGstMonth(e.target.value)}
+            className="border-2 border-gray-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand" />
+        </div>
+        <div className="flex-1" />
+        <button onClick={downloadGSTReport} disabled={gstLoading}
+          className="flex items-center gap-2 px-5 py-3 bg-green-600 text-white rounded-xl font-black text-sm hover:bg-green-700 disabled:opacity-60 shadow-sm">
+          {gstLoading
+            ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            : <FileText size={16} />}
+          {gstLoading ? 'Generating…' : 'Download GST Report (CSV)'}
+        </button>
       </div>
 
       {/* Date picker + Calculate */}
@@ -263,7 +372,7 @@ export default function DailySettlements() {
           ) : (
             <Calculator size={16} />
           )}
-          {calculating ? 'Calculatingâ€¦' : 'Calculate'}
+          {calculating ? 'Calculating…' : 'Calculate'}
         </button>
       </div>
 
@@ -282,7 +391,7 @@ export default function DailySettlements() {
                 { label: 'Orders', value: preview.totalOrders, sub: 'delivered & unsettled', color: 'border-blue-400' },
                 { label: 'Gross Revenue', value: toINR(preview.totalGross), sub: 'total from customers', color: 'border-gray-300' },
                 { label: 'Net to Restaurants', value: toINR(preview.totalNetToRestaurants), sub: `after ${preview.commissionRate}% commission`, color: 'border-orange-400' },
-                { label: 'Rider Payouts', value: toINR(preview.totalRiderPay), sub: `â‚¹${preview.riderPayPerDelivery}/delivery`, color: 'border-blue-400' },
+                { label: 'Rider Payouts', value: toINR(preview.totalRiderPay), sub: `₹${preview.riderPayPerDelivery}/delivery`, color: 'border-blue-400' },
               ].map(c => (
                 <div key={c.label} className={`bg-white rounded-2xl border-l-4 ${c.color} border border-gray-100 shadow-sm p-4`}>
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">{c.label}</p>
@@ -343,7 +452,7 @@ export default function DailySettlements() {
                               </div>
                               <div>
                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Commission + GST</p>
-                                <p className="font-black text-red-500">âˆ’{toINR(r.commission + r.gstOnCommission)}</p>
+                                <p className="font-black text-red-500">−{toINR(r.commission + r.gstOnCommission)}</p>
                                 <p className="text-[10px] text-gray-400">{toINR(r.commission)} + {toINR(r.gstOnCommission)} GST</p>
                               </div>
                               <div>
@@ -373,7 +482,7 @@ export default function DailySettlements() {
                       <div className="flex-1 min-w-0">
                         <p className="font-black text-gray-900 truncate">{r.riderName}</p>
                         <p className="text-xs text-gray-400 font-medium">
-                          {r.deliveriesCount} deliveries Ã— {toINR(r.payPerDelivery)}
+                          {r.deliveriesCount} deliveries × {toINR(r.payPerDelivery)}
                         </p>
                       </div>
                       <div className="text-right flex-shrink-0">
@@ -386,31 +495,60 @@ export default function DailySettlements() {
               </div>
             )}
 
-            {/* Generate button */}
-            <div className="flex gap-3">
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="flex-1 flex items-center justify-center gap-2 py-4 bg-brand text-white rounded-2xl font-black text-base disabled:opacity-60 hover:bg-brand/90 transition-colors shadow-sm"
-              >
-                {generating ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <CheckCircle size={20} />
-                )}
-                {generating ? 'Generatingâ€¦' : `Generate ${preview.restaurants.length + preview.riders.length} Payouts`}
-              </button>
-              <button
-                onClick={() => setPreview(null)}
-                className="px-5 py-4 border-2 border-gray-100 rounded-2xl font-black text-gray-500 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+            {/* Generate button — two options */}
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+              <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">
+                Choose Payment Method
+              </p>
 
-            <p className="text-xs text-gray-400 text-center">
-              This will mark {preview.totalOrders} orders as settled and create payout records. Manage payments in the Payouts page.
-            </p>
+              <div className="grid grid-cols-2 gap-3">
+                {/* Manual Pay */}
+                <button
+                  onClick={() => handleGenerate('manual')}
+                  disabled={generating !== null}
+                  className="flex flex-col items-center gap-2 py-5 px-4 bg-green-500 hover:bg-green-600 text-white rounded-2xl font-black transition-colors disabled:opacity-60 shadow-sm"
+                >
+                  {generating === 'manual' ? (
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <Banknote size={26} />
+                  )}
+                  <div className="text-center">
+                    <p className="text-base">{generating === 'manual' ? 'Processing…' : 'Manual Pay'}</p>
+                    <p className="text-[11px] text-green-100 font-medium mt-0.5">Offline · marks completed</p>
+                  </div>
+                </button>
+
+                {/* Online Pay */}
+                <button
+                  onClick={() => handleGenerate('online')}
+                  disabled={generating !== null}
+                  className="flex flex-col items-center gap-2 py-5 px-4 bg-brand hover:bg-brand/90 text-white rounded-2xl font-black transition-colors disabled:opacity-60 shadow-sm"
+                >
+                  {generating === 'online' ? (
+                    <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <CreditCard size={26} />
+                  )}
+                  <div className="text-center">
+                    <p className="text-base">{generating === 'online' ? 'Processing…' : 'Online Pay'}</p>
+                    <p className="text-[11px] text-white/70 font-medium mt-0.5">Digital transfer · pending</p>
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between pt-1">
+                <p className="text-xs text-gray-400">
+                  Marks {preview.totalOrders} orders settled · {preview.restaurants.length + preview.riders.length} payouts
+                </p>
+                <button
+                  onClick={() => setPreview(null)}
+                  className="text-xs font-bold text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

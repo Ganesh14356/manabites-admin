@@ -9,7 +9,8 @@ import {
 import { db } from '../../firebase';
 import {
   Search, Eye, XCircle, UserPlus, MapPin, CheckCircle,
-  AlertTriangle, Bike, ChevronDown, X, Clock
+  AlertTriangle, Bike, ChevronDown, X, Clock,
+  Siren, Zap, RefreshCw, ChevronRight,
 } from 'lucide-react';
 
 interface OrderDoc {
@@ -172,13 +173,44 @@ export default function OrderManagement() {
   }), [orders]);
 
   const handleCancelOrder = async (orderId: string) => {
-    if (!window.confirm('Are you sure you want to cancel this order?')) return;
+    if (!window.confirm('Cancel this order and trigger auto-refund?')) return;
+    const order = orders.find(o => o.id === orderId);
     try {
-      await updateDoc(doc(db, 'orders', orderId), { status: 'cancelled' });
-      toast.success('Order cancelled');
+      await updateDoc(doc(db, 'orders', orderId), {
+        status:             'cancelled',
+        statusBeforeCancel: order?.status || 'unknown',
+        cancelledBy:        'admin',
+        cancellationReason: 'Admin cancelled',
+        updatedAt:          Timestamp.now(),
+      });
+      // Trigger auto-refund
+      fetch('/api/auto-refund', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ orderId, cancelledBy: 'admin', cancellationReason: 'Admin cancelled' }),
+      }).catch(() => {});
+      toast.success('Order cancelled and refund triggered');
       setSelectedOrderId(null);
-    } catch (error) {
+    } catch {
       toast.error('Failed to cancel order');
+    }
+  };
+
+  const handleEscalate = async (orderId: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { escalated: true, escalatedAt: Timestamp.now() });
+      toast.success('Order escalated — support team notified');
+    } catch {
+      toast.error('Failed to escalate');
+    }
+  };
+
+  const handleTogglePriority = async (orderId: string, current: boolean) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), { isPriority: !current });
+      toast.success(current ? 'Priority removed' : '⚡ Marked as Priority Delivery');
+    } catch {
+      toast.error('Failed to update priority');
     }
   };
 
@@ -533,15 +565,86 @@ export default function OrderManagement() {
                 )}
               </div>
 
-              {/* Actions */}
-              <div className="p-6 border-t border-gray-100 bg-gray-50">
+              {/* ── Order Timeline ─────────────────────────────────────── */}
+              {(() => {
+                const o = selectedOrder as any;
+                const TIMELINE = [
+                  { label: 'Order Placed',       ts: o.createdAt,    emoji: '📝' },
+                  { label: 'Restaurant Accepted', ts: o.acceptedAt,   emoji: '✅' },
+                  { label: 'Preparing',           ts: o.preparingAt,  emoji: '👨‍🍳' },
+                  { label: 'Ready',               ts: o.readyAt,      emoji: '📦' },
+                  { label: 'Rider Assigned',      ts: o.riderAssignedAt || o.assignedAt, emoji: '🛵' },
+                  { label: 'Picked Up',           ts: o.pickedUpAt,   emoji: '⬆️' },
+                  { label: 'Delivered',           ts: o.deliveredAt,  emoji: '🏠' },
+                ];
+                const steps = TIMELINE.filter(s => s.ts);
+                if (!steps.length) return null;
+                return (
+                  <div className="px-6 pb-4">
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Order Timeline</p>
+                    <div className="relative">
+                      <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-100" />
+                      <div className="space-y-3">
+                        {steps.map((s, i) => (
+                          <div key={i} className="flex items-start gap-3 relative">
+                            <div className="w-7 h-7 rounded-full bg-white border-2 border-brand flex items-center justify-center text-sm z-10 flex-shrink-0">
+                              {s.emoji}
+                            </div>
+                            <div className="pt-0.5">
+                              <p className="text-sm font-bold text-gray-800">{s.label}</p>
+                              <p className="text-xs text-gray-400">{formatDate(s.ts)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {o.cancellationReason && (
+                      <div className="mt-3 bg-red-50 rounded-xl px-3 py-2 text-xs text-red-700 font-bold">
+                        ❌ Cancelled: {o.cancellationReason} {o.cancelledBy ? `(by ${o.cancelledBy})` : ''}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Admin Actions ──────────────────────────────────────── */}
+              <div className="p-6 border-t border-gray-100 bg-gray-50 space-y-2">
                 {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'delivered' && (
-                  <button
-                    onClick={() => handleCancelOrder(selectedOrder.id)}
-                    className="w-full py-3 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 flex items-center justify-center gap-2"
-                  >
-                    <AlertTriangle className="w-4 h-4" /> Cancel Order
-                  </button>
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => handleTogglePriority(selectedOrder.id, !!(selectedOrder as any).isPriority)}
+                        className={`py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                          (selectedOrder as any).isPriority
+                            ? 'bg-yellow-400 text-white'
+                            : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+                        }`}
+                      >
+                        <Zap className="w-4 h-4" />
+                        {(selectedOrder as any).isPriority ? 'Priority ✓' : 'Set Priority'}
+                      </button>
+                      <button
+                        onClick={() => handleEscalate(selectedOrder.id)}
+                        disabled={!!(selectedOrder as any).escalated}
+                        className="py-2.5 rounded-xl bg-orange-50 text-orange-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-orange-100 disabled:opacity-50"
+                      >
+                        <Siren className="w-4 h-4" />
+                        {(selectedOrder as any).escalated ? 'Escalated ✓' : 'Escalate'}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => { setShowAssignModal(true); }}
+                      className="w-full py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-blue-100"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Reassign Rider
+                    </button>
+                    <button
+                      onClick={() => handleCancelOrder(selectedOrder.id)}
+                      className="w-full py-2.5 bg-red-100 text-red-700 font-bold rounded-xl text-sm hover:bg-red-200 flex items-center justify-center gap-2"
+                    >
+                      <XCircle className="w-4 h-4" /> Cancel Order
+                    </button>
+                  </>
                 )}
               </div>
             </motion.div>
