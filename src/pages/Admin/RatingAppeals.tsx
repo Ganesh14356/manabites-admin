@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot, doc, updateDoc, orderBy, query } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -40,6 +40,9 @@ export default function RatingAppeals() {
     return onSnapshot(q, snap => {
       setAppeals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Appeal)));
       setLoading(false);
+    }, (err) => {
+      console.error('[RatingAppeals] Firestore error:', err.message);
+      setLoading(false);
     });
   }, []);
 
@@ -52,7 +55,7 @@ export default function RatingAppeals() {
         adminNote: adminNote.trim() || null,
         resolvedAt: Date.now(),
       });
-      toast.success(status === 'approved' ? 'Appeal approved â€” rating will be reviewed' : 'Appeal rejected');
+      toast.success(status === 'approved' ? 'Appeal approved — rating will be reviewed' : 'Appeal rejected');
       setSelected(null);
       setAdminNote('');
     } catch {
@@ -66,7 +69,7 @@ export default function RatingAppeals() {
   const pendingCount = appeals.filter(a => a.status === 'pending').length;
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-gray-900">Rating Appeals</h1>
@@ -88,10 +91,10 @@ export default function RatingAppeals() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-gray-400">Loadingâ€¦</div>
+        <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
       ) : displayed.length === 0 ? (
         <div className="bg-white rounded-2xl p-12 text-center border border-gray-100">
-          <div className="text-5xl mb-3">â­</div>
+          <div className="text-5xl mb-3">⭐</div>
           <p className="font-black text-gray-600 text-lg">No {filter === 'pending' ? 'pending ' : ''}appeals</p>
         </div>
       ) : (

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
@@ -66,7 +66,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function timeAgo(ts: any) {
-  if (!ts) return 'â€”';
+  if (!ts) return '—';
   const date = ts?.toDate ? ts.toDate() : new Date(ts);
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
   if (secs < 60) return 'just now';
@@ -279,10 +279,10 @@ export default function Complaints() {
                       )}
                     </div>
                     <p className="text-xs text-gray-500 font-bold mt-0.5">
-                      {CATEGORY_LABELS[complaint.category] || complaint.category} Â· {complaint.targetName}
+                      {CATEGORY_LABELS[complaint.category] || complaint.category} · {complaint.targetName}
                     </p>
                     <p className="text-xs text-gray-400 mt-1 line-clamp-2">{complaint.description}</p>
-                    <p className="text-[10px] text-gray-300 mt-1">#{complaint.orderId.slice(-8).toUpperCase()} Â· {timeAgo(complaint.createdAt)}</p>
+                    <p className="text-[10px] text-gray-300 mt-1">#{complaint.orderId.slice(-8).toUpperCase()} · {timeAgo(complaint.createdAt)}</p>
                   </div>
                 </div>
                 <div className="flex flex-col gap-1.5 items-end flex-shrink-0">

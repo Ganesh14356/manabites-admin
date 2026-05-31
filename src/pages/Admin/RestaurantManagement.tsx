@@ -12,7 +12,7 @@ import {
 } from 'firebase/auth';
 import {
   collection, doc, addDoc, updateDoc, setDoc,
-  onSnapshot, query, orderBy,
+  onSnapshot, query, orderBy, where, limit,
   serverTimestamp, Timestamp
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
@@ -32,7 +32,8 @@ import {
   Check as FiCheck,
   Eye as FiEye,
   EyeOff as FiEyeOff,
-  RefreshCw as FiRefreshCw
+  RefreshCw as FiRefreshCw,
+  IndianRupee, Banknote, CreditCard, Clock, CheckCircle2,
 } from 'lucide-react';
 
 // ── TYPES ─────────────────────────────────────────────────────────
@@ -493,11 +494,27 @@ function EditRestaurantModal({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [payouts, setPayouts] = useState<any[]>([]);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EditFormData>({
     resolver: zodResolver(editRestaurantSchema),
   });
   const watchedAddress = watch('address', '');
+
+  useEffect(() => {
+    if (!restaurant?.id) { setPayouts([]); return; }
+    const q = query(
+      collection(db, 'payouts'),
+      where('entityId', '==', restaurant.id),
+      where('entityType', '==', 'restaurant'),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    );
+    const unsub = onSnapshot(q, snap => {
+      setPayouts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, () => {});
+    return () => unsub();
+  }, [restaurant?.id]);
 
   useEffect(() => {
     if (restaurant) {
@@ -660,6 +677,71 @@ function EditRestaurantModal({
                 )}
               </motion.button>
             </form>
+
+            {/* ── Payout History ── */}
+            <div className="px-6 pb-8">
+              <div className="flex items-center gap-2 mb-3 pt-2 border-t border-gray-100">
+                <IndianRupee size={15} className="text-brand" />
+                <h3 className="font-black text-gray-800 text-sm uppercase tracking-wide">Payout History</h3>
+              </div>
+
+              {payouts.length === 0 ? (
+                <div className="bg-gray-50 rounded-2xl p-6 text-center">
+                  <IndianRupee size={28} className="mx-auto text-gray-300 mb-2" />
+                  <p className="text-sm text-gray-400 font-semibold">No payouts yet</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Run a daily settlement to generate records</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {payouts.map((p: any) => {
+                    const fmtDate = (val: any) => {
+                      if (!val) return '—';
+                      try {
+                        const d = val?.toDate ? val.toDate() : new Date(val?.toMillis?.() ?? val);
+                        return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+                      } catch { return '—'; }
+                    };
+                    const BADGE: Record<string, string> = {
+                      completed: 'bg-green-100 text-green-700',
+                      paid:      'bg-green-100 text-green-700',
+                      pending:   'bg-amber-100 text-amber-700',
+                      failed:    'bg-red-100 text-red-600',
+                    };
+                    return (
+                      <div key={p.id} className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            {p.paymentMethod === 'manual'
+                              ? <Banknote size={14} className="text-green-500" />
+                              : <CreditCard size={14} className="text-brand" />}
+                            <span className="text-xs font-bold text-gray-500 capitalize">
+                              {p.paymentMethod === 'manual' ? 'Manual (offline)' : 'Online'}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${BADGE[p.status] || 'bg-gray-100 text-gray-500'}`}>
+                            {p.status}
+                          </span>
+                        </div>
+                        <p className="text-xl font-black text-gray-900">
+                          ₹{Number(p.amount ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        </p>
+                        <div className="flex items-center justify-between mt-1">
+                          <p className="text-xs text-gray-400">{p.ordersCount ?? '—'} orders · {p.settlementDate || fmtDate(p.createdAt)}</p>
+                          {p.status === 'completed' || p.status === 'paid'
+                            ? <CheckCircle2 size={14} className="text-green-500" />
+                            : <Clock size={14} className="text-amber-400" />}
+                        </div>
+                        {p.grossAmount && (
+                          <p className="text-[10px] text-gray-400 mt-1">
+                            Gross ₹{Number(p.grossAmount).toLocaleString('en-IN', { maximumFractionDigits: 2 })} · Commission ₹{Number(p.commission ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} + GST ₹{Number(p.gstOnCommission ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </motion.div>
         </>
       )}

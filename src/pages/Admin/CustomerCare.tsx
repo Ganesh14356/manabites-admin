@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
@@ -41,7 +41,7 @@ function formatPhone(p: string) {
 }
 
 function timeAgo(ts: any) {
-  if (!ts) return 'â€”';
+  if (!ts) return '—';
   const date = ts?.toDate ? ts.toDate() : new Date(ts);
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
   if (secs < 60) return 'just now';
@@ -167,11 +167,11 @@ export default function CustomerCare() {
       }
 
       setCallingState('connected');
-      toast.success('MSG91 is calling you â€” pick up to connect to the customer!', { duration: 6000 });
+      toast.success('MSG91 is calling you — pick up to connect to the customer!', { duration: 6000 });
       setTimeout(() => { setCallingState('idle'); setShowCallSheet(false); }, 5000);
     } catch (err) {
       setCallingState('error');
-      toast.error('Call failed â€” check MSG91 configuration');
+      toast.error('Call failed — check MSG91 configuration');
       await addDoc(collection(db, 'call_logs'), {
         agentName: profile?.name || user?.email || 'Admin',
         customerName: selectedCustomer.name,
@@ -188,9 +188,9 @@ export default function CustomerCare() {
     <div className="max-w-6xl mx-auto p-4 md:p-6 pb-16">
       <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="mb-6">
         <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
-          ðŸŽ§ Customer Care
+          🎧 Customer Care
         </h1>
-        <p className="text-gray-400 text-sm mt-0.5">Call customers via masked number â€” your number stays private</p>
+        <p className="text-gray-400 text-sm mt-0.5">Call customers via masked number — your number stays private</p>
       </motion.div>
 
       {/* Tabs */}
@@ -199,19 +199,19 @@ export default function CustomerCare() {
           onClick={() => setActiveTab('customers')}
           className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'customers' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
-          ðŸ‘¥ Customers {customers.length > 0 ? `(${customers.length})` : ''}
+          👥 Customers {customers.length > 0 ? `(${customers.length})` : ''}
         </button>
         <button
           onClick={() => setActiveTab('logs')}
           className={`px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'logs' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
-          ðŸ“‹ Call Logs {callLogs.length > 0 ? `(${callLogs.length})` : ''}
+          📋 Call Logs {callLogs.length > 0 ? `(${callLogs.length})` : ''}
         </button>
         <button
           onClick={() => setActiveTab('complaints')}
           className={`px-5 py-2 rounded-lg text-sm font-bold transition-all relative ${activeTab === 'complaints' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
-          ðŸš© Complaints
+          🚩 Complaints
           {complaints.filter((c: any) => c.status === 'open').length > 0 && (
             <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center px-0.5">
               {complaints.filter((c: any) => c.status === 'open').length}
@@ -270,7 +270,7 @@ export default function CustomerCare() {
                             </div>
                           </div>
                         </td>
-                        <td className="table-cell text-gray-600">{c.phone ? formatPhone(c.phone) : 'â€”'}</td>
+                        <td className="table-cell text-gray-600">{c.phone ? formatPhone(c.phone) : '—'}</td>
                         <td className="table-cell">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 rounded-full text-xs font-bold text-gray-600">
                             <Package className="w-3 h-3" /> {c.totalOrders}
@@ -333,7 +333,7 @@ export default function CustomerCare() {
                     <div className="text-xs text-gray-400">{formatPhone(log.customerPhone)}</div>
                   </td>
                   <td className="table-cell text-gray-500 font-mono text-xs">
-                    {log.orderId ? `#${String(log.orderId).slice(-6).toUpperCase()}` : 'â€”'}
+                    {log.orderId ? `#${String(log.orderId).slice(-6).toUpperCase()}` : '—'}
                   </td>
                   <td className="table-cell text-gray-500 text-xs">{timeAgo(log.calledAt)}</td>
                   <td className="table-cell">
@@ -380,11 +380,11 @@ export default function CustomerCare() {
                     }`}>{c.priority}</span>
                   </div>
                   <p className="text-xs font-bold text-gray-600">
-                    {c.type === 'rider' ? 'ðŸ›µ' : 'ðŸ±'} {c.targetName} â€” {c.category?.replace(/_/g, ' ')}
+                    {c.type === 'rider' ? '🛵' : '🍱'} {c.targetName} — {c.category?.replace(/_/g, ' ')}
                   </p>
                   <p className="text-xs text-gray-400 mt-1 line-clamp-2">{c.description}</p>
                   <p className="text-[10px] text-gray-300 mt-1">
-                    #{c.orderId?.slice(-8).toUpperCase()} Â· {timeAgo(c.createdAt)}
+                    #{c.orderId?.slice(-8).toUpperCase()} · {timeAgo(c.createdAt)}
                   </p>
                 </div>
                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase flex-shrink-0 ${
@@ -419,7 +419,7 @@ export default function CustomerCare() {
                   </div>
                   <div>
                     <h3 className="font-black text-gray-900">Call {selectedCustomer.name}</h3>
-                    <p className="text-xs text-gray-400">Number masking â€” your number stays private</p>
+                    <p className="text-xs text-gray-400">Number masking — your number stays private</p>
                   </div>
                 </div>
                 <button onClick={() => setShowCallSheet(false)} className="p-2 bg-gray-100 rounded-full">
@@ -486,7 +486,7 @@ export default function CustomerCare() {
                 </button>
               )}
               <p className="text-center text-xs text-gray-400 mt-3">
-                MSG91 calls you first â†’ when you pick up â†’ connects to the customer
+                MSG91 calls you first → when you pick up → connects to the customer
               </p>
             </motion.div>
           </>

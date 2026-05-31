@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
@@ -29,7 +29,7 @@ interface Restaurant {
 }
 
 function formatDate(ts: any): string {
-  if (!ts) return 'â€”';
+  if (!ts) return '—';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
@@ -146,7 +146,7 @@ export default function ReviewsManagement() {
 
   const avgRating = reviews.length > 0
     ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
-    : 'â€”';
+    : '—';
   const flaggedCount = reviews.filter(r => r.isFlagged).length;
   const lowRatings   = reviews.filter(r => r.rating <= 2).length;
 
@@ -160,10 +160,10 @@ export default function ReviewsManagement() {
       {/* Summary */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Total Reviews', value: reviews.length, icon: 'â­', color: 'text-yellow-600 bg-yellow-50' },
-          { label: 'Avg Rating',    value: avgRating + ' â˜…', icon: 'ðŸ“Š', color: 'text-brand bg-brand/10'  },
-          { label: 'Flagged',       value: flaggedCount, icon: 'ðŸš©', color: 'text-red-600 bg-red-50'      },
-          { label: 'Low (â‰¤ 2â˜…)',    value: lowRatings,   icon: 'âš ï¸', color: 'text-orange-600 bg-orange-50'},
+          { label: 'Total Reviews', value: reviews.length, icon: '⭐', color: 'text-yellow-600 bg-yellow-50' },
+          { label: 'Avg Rating',    value: avgRating + ' ★', icon: '📊', color: 'text-brand bg-brand/10'  },
+          { label: 'Flagged',       value: flaggedCount, icon: '🚩', color: 'text-red-600 bg-red-50'      },
+          { label: 'Low (≤ 2★)',    value: lowRatings,   icon: '⚠️', color: 'text-orange-600 bg-orange-50'},
         ].map(c => (
           <div key={c.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 text-sm ${c.color}`}>
@@ -182,7 +182,7 @@ export default function ReviewsManagement() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search reviewsâ€¦"
+            placeholder="Search reviews…"
             className="w-full pl-9 pr-4 py-2.5 rounded-xl border-2 border-gray-100 focus:border-brand text-sm font-bold outline-none"
           />
         </div>
@@ -207,7 +207,7 @@ export default function ReviewsManagement() {
                 ratingFilter === r ? 'bg-yellow-400 text-white' : 'bg-gray-100 text-gray-500'
               }`}
             >
-              {r === 'all' ? 'All â˜…' : `${r}â˜…`}
+              {r === 'all' ? 'All ★' : `${r}★`}
             </button>
           ))}
         </div>
@@ -259,7 +259,7 @@ export default function ReviewsManagement() {
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <div>
                       <span className="font-black text-gray-900 text-sm">{review.userName || 'Anonymous'}</span>
-                      <span className="text-gray-400 text-xs font-bold ml-2">Â· {review.restaurantName}</span>
+                      <span className="text-gray-400 text-xs font-bold ml-2">· {review.restaurantName}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <StarRow value={review.rating} />
@@ -284,7 +284,7 @@ export default function ReviewsManagement() {
                   {/* Status badges */}
                   <div className="flex items-center gap-2 mt-2">
                     {review.isFlagged && (
-                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-600 uppercase">ðŸš© Flagged</span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-600 uppercase">🚩 Flagged</span>
                     )}
                     {review.isHidden && (
                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 uppercase">Hidden</span>

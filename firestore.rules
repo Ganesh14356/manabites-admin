@@ -322,6 +322,69 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── Sub-Admins ────────────────────────────────────────────────────────────
+    // Super admin creates/edits sub-admin accounts; sub-admins can read their own
+    match /subAdmins/{subAdminId} {
+      allow read:   if isAdmin() || (isAuth() && uid() == subAdminId);
+      allow write:  if isAdmin();
+    }
+
+    // ── Admin Users (role registry for portal access) ─────────────────────────
+    // Stores role + permissions for sub-admins and franchise accounts
+    match /adminUsers/{userId} {
+      allow read:   if isAdmin() || (isAuth() && uid() == userId);
+      allow write:  if isAdmin();
+    }
+
+    // ── Campaigns ─────────────────────────────────────────────────────────────
+    match /campaigns/{campaignId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Cities ────────────────────────────────────────────────────────────────
+    match /cities/{cityId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Franchises ────────────────────────────────────────────────────────────
+    match /franchises/{franchiseId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Rider Incentive Plans ─────────────────────────────────────────────────
+    match /riderIncentivePlans/{planId} {
+      allow read: if isAdmin() || isAuth();
+      allow write: if isAdmin();
+    }
+
+    // ── Rider Incentive Claims ────────────────────────────────────────────────
+    match /riderIncentiveClaims/{claimId} {
+      allow read: if isAdmin() || isAuth();
+      allow write: if isAdmin() || isAuth();
+    }
+
+    // ── Rider Wallet Transactions ─────────────────────────────────────────────
+    match /riderWalletTransactions/{txId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.riderId == uid());
+      allow write: if isAdmin();
+    }
+
+    // ── Referrals ─────────────────────────────────────────────────────────────
+    match /referrals/{refId} {
+      allow read: if isAdmin() || (isAuth() && (resource.data.referrerId == uid() || resource.data.referredId == uid()));
+      allow create: if isAuth();
+      allow update: if isAdmin();
+    }
+
+    // ── Verticals config ──────────────────────────────────────────────────────
+    match /verticals/{verticalId} {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
+
     // ── Catch-all: deny everything not matched above ──────────────────────────
     match /{document=**} {
       allow read, write: if false;

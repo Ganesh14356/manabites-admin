@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
@@ -120,7 +120,7 @@ export default function Fines() {
         issuedAt:   serverTimestamp(),
         deductedAt: null,
       });
-      toast.success(`Fine of â‚¹${form.amount} issued to ${form.targetName}`);
+      toast.success(`Fine of ₹${form.amount} issued to ${form.targetName}`);
       setShowModal(false);
       setForm({ targetType: 'rider', targetSearch: '', targetId: '', targetName: '', amount: '', reason: '', customReason: '', orderId: '', notes: '' });
       setSearchResults([]);
@@ -149,7 +149,7 @@ export default function Fines() {
         status:     'deducted',
         deductedAt: serverTimestamp(),
       });
-      toast.success(`â‚¹${fine.amount} deducted from ${fine.targetName}`);
+      toast.success(`₹${fine.amount} deducted from ${fine.targetName}`);
     } catch {
       toast.error('Deduction failed');
     } finally {
@@ -199,8 +199,8 @@ export default function Fines() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[
-          { label: 'Pending Fines', value: fines.filter(f => f.status === 'pending').length, sub: `â‚¹${totalPending.toLocaleString()} pending`, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'Deducted', value: fines.filter(f => f.status === 'deducted').length, sub: `â‚¹${totalDeducted.toLocaleString()} recovered`, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Pending Fines', value: fines.filter(f => f.status === 'pending').length, sub: `₹${totalPending.toLocaleString()} pending`, color: 'text-amber-600', bg: 'bg-amber-50' },
+          { label: 'Deducted', value: fines.filter(f => f.status === 'deducted').length, sub: `₹${totalDeducted.toLocaleString()} recovered`, color: 'text-green-600', bg: 'bg-green-50' },
           { label: 'Waived', value: fines.filter(f => f.status === 'waived').length, sub: 'Forgiven fines', color: 'text-gray-500', bg: 'bg-gray-50' },
         ].map(s => (
           <div key={s.label} className={`${s.bg} rounded-2xl p-4`}>
@@ -218,7 +218,7 @@ export default function Fines() {
           <input
             value={searchText}
             onChange={e => setSearchText(e.target.value)}
-            placeholder="Search by name or reasonâ€¦"
+            placeholder="Search by name or reason…"
             className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-xl text-sm"
           />
         </div>
@@ -226,7 +226,7 @@ export default function Fines() {
           {(['all', 'rider', 'restaurant'] as const).map(t => (
             <button key={t} onClick={() => setFilterType(t)}
               className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${filterType === t ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
-              {t === 'all' ? 'All' : t === 'rider' ? 'ðŸ›µ Riders' : 'ðŸ½ï¸ Restaurants'}
+              {t === 'all' ? 'All' : t === 'rider' ? '🛵 Riders' : '🍽️ Restaurants'}
             </button>
           ))}
         </div>
@@ -242,7 +242,7 @@ export default function Fines() {
 
       {/* Fines List */}
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loadingâ€¦</div>
+        <div className="text-center py-12 text-gray-400">Loading…</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <AlertTriangle size={32} className="mx-auto mb-2 opacity-30" />
@@ -274,7 +274,7 @@ export default function Fines() {
                     <p className="font-bold text-gray-800 text-sm">{fine.targetName}</p>
                     <p className="text-xs text-gray-500 capitalize">{fine.targetType}</p>
                   </div>
-                  <p className="font-black text-lg text-red-500 flex-shrink-0">âˆ’â‚¹{fine.amount}</p>
+                  <p className="font-black text-lg text-red-500 flex-shrink-0">−₹{fine.amount}</p>
                 </div>
                 <p className="text-xs text-gray-600 mt-1 flex items-center gap-1">
                   <FileText size={11} /> {fine.reason}
@@ -376,12 +376,12 @@ export default function Fines() {
                     <input
                       value={form.targetSearch}
                       onChange={e => { setForm(f => ({ ...f, targetSearch: e.target.value, targetId: '', targetName: '' })); searchTarget(e.target.value); }}
-                      placeholder={`Type ${form.targetType} nameâ€¦`}
+                      placeholder={`Type ${form.targetType} name…`}
                       className="w-full pl-8 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm"
                     />
                   </div>
                   {form.targetId && (
-                    <p className="text-xs text-green-600 font-bold mt-1">âœ“ {form.targetName} selected</p>
+                    <p className="text-xs text-green-600 font-bold mt-1">✓ {form.targetName} selected</p>
                   )}
                   {searchResults.length > 0 && !form.targetId && (
                     <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg z-10 mt-1 overflow-hidden">
@@ -401,7 +401,7 @@ export default function Fines() {
 
                 {/* Amount */}
                 <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">Fine Amount (â‚¹)</label>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">Fine Amount (₹)</label>
                   <input
                     type="number"
                     value={form.amount}
@@ -419,7 +419,7 @@ export default function Fines() {
                     onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm"
                   >
-                    <option value="">Select reasonâ€¦</option>
+                    <option value="">Select reason…</option>
                     {FINE_REASONS[form.targetType].map(r => (
                       <option key={r} value={r}>{r}</option>
                     ))}
@@ -428,7 +428,7 @@ export default function Fines() {
                     <input
                       value={form.customReason}
                       onChange={e => setForm(f => ({ ...f, customReason: e.target.value }))}
-                      placeholder="Describe the reasonâ€¦"
+                      placeholder="Describe the reason…"
                       className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm mt-2"
                     />
                   )}
@@ -451,7 +451,7 @@ export default function Fines() {
                   <textarea
                     value={form.notes}
                     onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                    placeholder="Additional detailsâ€¦"
+                    placeholder="Additional details…"
                     rows={2}
                     className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm resize-none"
                   />
@@ -462,7 +462,7 @@ export default function Fines() {
                   disabled={submitting}
                   className="w-full bg-red-500 text-white font-bold py-3 rounded-xl hover:bg-red-600 transition-colors disabled:opacity-50"
                 >
-                  {submitting ? 'Issuingâ€¦' : `Issue â‚¹${form.amount || 'â€”'} Fine`}
+                  {submitting ? 'Issuing…' : `Issue ₹${form.amount || '—'} Fine`}
                 </button>
               </div>
             </motion.div>

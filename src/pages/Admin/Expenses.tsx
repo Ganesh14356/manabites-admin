@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
@@ -41,7 +41,7 @@ function getCategoryMeta(id: string) {
 }
 
 function formatDate(ts: any) {
-  if (!ts) return 'â€”';
+  if (!ts) return '—';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
@@ -190,7 +190,7 @@ export default function Expenses() {
             </div>
             <div>
               <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">This Month's Expenses</p>
-              <p className="text-2xl font-black text-red-600">â‚¹{monthlyTotal.toLocaleString('en-IN')}</p>
+              <p className="text-2xl font-black text-red-600">₹{monthlyTotal.toLocaleString('en-IN')}</p>
             </div>
           </div>
         </div>
@@ -200,7 +200,7 @@ export default function Expenses() {
               <cat.icon className={`w-4 h-4 ${cat.color.split(' ')[1]}`} />
             </div>
             <p className="text-xs font-bold text-gray-400 truncate">{cat.label}</p>
-            <p className="text-lg font-black text-gray-800">â‚¹{(totalByCategory[cat.id] || 0).toLocaleString('en-IN')}<span className="text-xs text-gray-400 font-medium">/mo</span></p>
+            <p className="text-lg font-black text-gray-800">₹{(totalByCategory[cat.id] || 0).toLocaleString('en-IN')}<span className="text-xs text-gray-400 font-medium">/mo</span></p>
           </div>
         ))}
       </div>
@@ -221,7 +221,7 @@ export default function Expenses() {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between mb-1">
                     <span className="text-xs font-bold text-gray-700">{cat.label}</span>
-                    <span className="text-xs font-black text-gray-800">â‚¹{amt.toLocaleString('en-IN')}/mo</span>
+                    <span className="text-xs font-black text-gray-800">₹{amt.toLocaleString('en-IN')}/mo</span>
                   </div>
                   <div className="h-1.5 bg-gray-100 rounded-full">
                     <div className={`h-1.5 rounded-full ${cat.color.split(' ')[0].replace('50', '400')}`} style={{ width: `${pct}%` }} />
@@ -285,22 +285,22 @@ export default function Expenses() {
                     <p className="font-bold text-gray-900 text-sm truncate">{e.description}</p>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[10px] font-bold text-gray-400 capitalize">{cat.label}</span>
-                      <span className="text-[10px] text-gray-300">Â·</span>
+                      <span className="text-[10px] text-gray-300">·</span>
                       <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
                         e.recurrence === 'monthly' ? 'bg-blue-50 text-blue-600' :
                         e.recurrence === 'yearly'  ? 'bg-purple-50 text-purple-600' :
                         'bg-gray-50 text-gray-500'
                       }`}>{e.recurrence}</span>
-                      <span className="text-[10px] text-gray-300">Â·</span>
+                      <span className="text-[10px] text-gray-300">·</span>
                       <span className="text-[10px] text-gray-400 flex items-center gap-0.5">
                         <Calendar className="w-2.5 h-2.5" />{formatDate(e.date ?? e.createdAt)}
                       </span>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="font-black text-red-600 text-base">â‚¹{e.amount.toLocaleString('en-IN')}</p>
+                    <p className="font-black text-red-600 text-base">₹{e.amount.toLocaleString('en-IN')}</p>
                     <p className="text-[10px] text-gray-400">
-                      {e.recurrence === 'yearly' ? `â‚¹${Math.round(e.amount / 12)}/mo` : `/${e.recurrence.replace('one-time', 'once')}`}
+                      {e.recurrence === 'yearly' ? `₹${Math.round(e.amount / 12)}/mo` : `/${e.recurrence.replace('one-time', 'once')}`}
                     </p>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0 ml-2">
@@ -389,9 +389,9 @@ export default function Expenses() {
               {/* Amount + Recurrence */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Amount (â‚¹)</p>
+                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Amount (₹)</p>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">â‚¹</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">₹</span>
                     <input
                       type="number"
                       value={amount}

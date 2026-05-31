@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, addDoc, serverTimestamp, onSnapshot,
@@ -27,11 +27,11 @@ const AUDIENCE_OPTIONS: { id: Audience; label: string; sub: string; icon: React.
 ];
 
 const QUICK_TEMPLATES = [
-  { title: 'ðŸŽ‰ Special Offer!',       message: 'Use code SPECIAL20 for 20% off your next order. Limited time!' },
-  { title: 'ðŸ›µ New Riders Needed',    message: 'Join our delivery team and earn â‚¹500+ per day. Apply now!' },
-  { title: 'ðŸ” New Restaurant Added', message: 'Check out the newest restaurant on Mana Bites â€” amazing food!' },
-  { title: 'âš ï¸ Scheduled Maintenance',message: 'The app will be briefly down for maintenance on Sunday 2 AMâ€“3 AM.' },
-  { title: 'ðŸŒŸ Rate Your Last Order', message: 'How was your last order? Share your experience and help others!' },
+  { title: '🎉 Special Offer!',         message: 'Use code SPECIAL20 for 20% off your next order. Limited time!' },
+  { title: '🛵 New Riders Needed',      message: 'Join our delivery team and earn ₹500+ per day. Apply now!' },
+  { title: '🍔 New Restaurant Added',   message: 'Check out the newest restaurant on Mana Bites — amazing food!' },
+  { title: '⚠️ Scheduled Maintenance', message: 'The app will be briefly down for maintenance on Sunday 2 AM–3 AM.' },
+  { title: '🌟 Rate Your Last Order',   message: 'How was your last order? Share your experience and help others!' },
 ];
 
 export default function NotificationsBroadcast() {
@@ -80,7 +80,7 @@ export default function NotificationsBroadcast() {
     try {
       const recipients = await getRecipients();
 
-      // Write individual notifications (batched in chunks of 50 to avoid overwhelming)
+      // 1. Write in-app notification docs (shown when app is open)
       const CHUNK = 50;
       for (let i = 0; i < recipients.length; i += CHUNK) {
         await Promise.all(
@@ -97,7 +97,7 @@ export default function NotificationsBroadcast() {
         );
       }
 
-      // Log this broadcast
+      // 2. Log the broadcast
       await addDoc(collection(db, 'broadcastNotifications'), {
         title:     title.trim(),
         message:   message.trim(),
@@ -106,7 +106,25 @@ export default function NotificationsBroadcast() {
         createdAt: serverTimestamp(),
       });
 
-      toast.success(`Sent to ${recipients.length} recipients!`);
+      // 3. Send real FCM push notifications to mobile devices
+      let pushResult = { success: 0, failed: 0, total: 0 };
+      try {
+        const resp = await fetch('/api/send-fcm', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ title: title.trim(), message: message.trim(), audience }),
+        });
+        if (resp.ok) {
+          pushResult = await resp.json();
+        }
+      } catch {
+        // Push failure is non-critical — in-app notifications already sent
+      }
+
+      const pushInfo = pushResult.total > 0
+        ? ` · 📱 Push sent to ${pushResult.success}/${pushResult.total} devices`
+        : '';
+      toast.success(`Sent to ${recipients.length} recipients!${pushInfo}`);
       setTitle('');
       setMessage('');
     } catch (err: any) {
@@ -117,7 +135,7 @@ export default function NotificationsBroadcast() {
   };
 
   const formatDate = (ts: any) => {
-    if (!ts) return 'â€”';
+    if (!ts) return '—';
     const d = ts?.toDate ? ts.toDate() : new Date(ts);
     return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
@@ -194,7 +212,7 @@ export default function NotificationsBroadcast() {
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 maxLength={80}
-                placeholder="Notification titleâ€¦"
+                placeholder="Notification title…"
                 className="w-full rounded-xl border-2 border-gray-100 focus:border-brand px-4 py-3 text-sm font-bold outline-none"
               />
               <p className="text-[10px] text-gray-400 text-right mt-1">{title.length}/80</p>
@@ -206,7 +224,7 @@ export default function NotificationsBroadcast() {
                 onChange={e => setMessage(e.target.value)}
                 maxLength={200}
                 rows={4}
-                placeholder="Notification bodyâ€¦"
+                placeholder="Notification body…"
                 className="w-full rounded-xl border-2 border-gray-100 focus:border-brand px-4 py-3 text-sm font-bold outline-none resize-none"
               />
               <p className="text-[10px] text-gray-400 text-right mt-1">{message.length}/200</p>
@@ -218,7 +236,7 @@ export default function NotificationsBroadcast() {
               className="w-full flex items-center justify-center gap-2 bg-brand text-white font-black py-3.5 rounded-xl disabled:opacity-50 text-sm uppercase tracking-widest"
             >
               {sending ? (
-                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sendingâ€¦</>
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending…</>
               ) : (
                 <><Send size={16} /> Send Notification</>
               )}
