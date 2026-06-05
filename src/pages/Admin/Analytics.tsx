@@ -316,6 +316,43 @@ export default function Analytics() {
 
   const salesData = useMemo(() => buildSalesChart(allOrders, period), [allOrders, period]);
 
+  // ── Period-filtered KPIs — update when period tab changes ────────────────
+  const periodKpis = useMemo(() => {
+    const now = new Date();
+    let start: Date;
+    switch (period) {
+      case 'daily':   start = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break;
+      case 'weekly':  start = new Date(now); start.setDate(now.getDate() - 7); start.setHours(0,0,0,0); break;
+      case 'monthly': start = new Date(now.getFullYear(), now.getMonth(), 1); break;
+      case 'yearly':  start = new Date(now.getFullYear(), 0, 1); break;
+      default:        start = new Date(0);
+    }
+
+    const filtered = allOrders.filter((o: any) => {
+      const d = o.createdAt?.toDate?.();
+      return d && d >= start;
+    });
+    const delivered = filtered.filter((o: any) => o.status === 'delivered');
+
+    let revenue = 0, platformFees = 0, deliveryFees = 0, taxes = 0;
+    delivered.forEach((o: any) => {
+      revenue      += o.totalAmount  || 0;
+      platformFees += o.platformFee  || 0;
+      deliveryFees += o.deliveryFee  || 0;
+      taxes        += o.tax          || 0;
+    });
+
+    return {
+      revenue,
+      orders:       filtered.length,
+      platformFees,
+      restaurantRevenue: Math.max(0, revenue - platformFees - deliveryFees - taxes),
+      riderPayouts: deliveryFees,
+    };
+  }, [allOrders, period]);
+
+  const periodLabel = { daily: 'Today', weekly: 'This Week', monthly: 'This Month', yearly: 'This Year' }[period];
+
   // ── Download helpers ──────────────────────────────────────────────────────
 
   const downloadSalesReport = () => {
@@ -381,15 +418,15 @@ export default function Analytics() {
   ].filter(d => d.value > 0);
 
   const statCards = [
-    { label: 'Total Revenue',      value: `₹${kpis.totalRevenue.toLocaleString('en-IN')}`,       icon: DollarSign,  bg: 'bg-orange-50',  iconColor: 'text-brand'      },
-    { label: 'Total Orders',       value: kpis.totalOrders,                                       icon: ShoppingBag, bg: 'bg-blue-50',    iconColor: 'text-blue-500'   },
-    { label: 'Platform Fee',       value: `₹${kpis.platformFees.toLocaleString('en-IN')}`,        icon: TrendingUp,  bg: 'bg-purple-50',  iconColor: 'text-purple-500' },
-    { label: 'Restaurant Revenue', value: `₹${kpis.restaurantRevenue.toLocaleString('en-IN')}`,   icon: Store,       bg: 'bg-green-50',   iconColor: 'text-green-500'  },
-    { label: 'Rider Payouts',      value: `₹${kpis.riderPayouts.toLocaleString('en-IN')}`,        icon: Bike,        bg: 'bg-yellow-50',  iconColor: 'text-yellow-600' },
-    { label: 'Refund Amount',      value: `₹${kpis.refundAmount.toLocaleString('en-IN')}`,        icon: RefreshCw,   bg: 'bg-red-50',     iconColor: 'text-red-500'    },
-    { label: 'Customers',          value: kpis.totalCustomers,                                     icon: Users,       bg: 'bg-pink-50',    iconColor: 'text-pink-500'   },
-    { label: 'Restaurants',        value: kpis.totalRestaurants,                                   icon: Store,       bg: 'bg-emerald-50', iconColor: 'text-emerald-500'},
-    { label: 'Active Riders',      value: kpis.totalRiders,                                        icon: Bike,        bg: 'bg-cyan-50',    iconColor: 'text-cyan-500'   },
+    { label: `${periodLabel} Revenue`,      value: `₹${periodKpis.revenue.toLocaleString('en-IN')}`,          icon: DollarSign,  bg: 'bg-orange-50',  iconColor: 'text-brand'      },
+    { label: `${periodLabel} Orders`,       value: periodKpis.orders,                                          icon: ShoppingBag, bg: 'bg-blue-50',    iconColor: 'text-blue-500'   },
+    { label: `${periodLabel} Platform Fee`, value: `₹${periodKpis.platformFees.toLocaleString('en-IN')}`,      icon: TrendingUp,  bg: 'bg-purple-50',  iconColor: 'text-purple-500' },
+    { label: `${periodLabel} Rest. Revenue`,value: `₹${periodKpis.restaurantRevenue.toLocaleString('en-IN')}`, icon: Store,       bg: 'bg-green-50',   iconColor: 'text-green-500'  },
+    { label: `${periodLabel} Rider Payouts`,value: `₹${periodKpis.riderPayouts.toLocaleString('en-IN')}`,      icon: Bike,        bg: 'bg-yellow-50',  iconColor: 'text-yellow-600' },
+    { label: 'Total Refunds (All)',         value: `₹${kpis.refundAmount.toLocaleString('en-IN')}`,            icon: RefreshCw,   bg: 'bg-red-50',     iconColor: 'text-red-500'    },
+    { label: 'Total Customers',             value: kpis.totalCustomers,                                         icon: Users,       bg: 'bg-pink-50',    iconColor: 'text-pink-500'   },
+    { label: 'Restaurants',                 value: kpis.totalRestaurants,                                       icon: Store,       bg: 'bg-emerald-50', iconColor: 'text-emerald-500'},
+    { label: 'Active Riders',               value: kpis.totalRiders,                                            icon: Bike,        bg: 'bg-cyan-50',    iconColor: 'text-cyan-500'   },
   ];
 
   if (loading) {
