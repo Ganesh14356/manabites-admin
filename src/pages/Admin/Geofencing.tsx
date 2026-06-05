@@ -1,11 +1,47 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { MapContainer, TileLayer, Marker, Circle, Popup, Polygon, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, Popup, Polygon, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import toast from 'react-hot-toast';
-import { Save, MapPin, ShieldCheck, Hexagon, X, RotateCcw } from 'lucide-react';
+import { Save, MapPin, ShieldCheck, Hexagon, X, RotateCcw, Search, Loader2 } from 'lucide-react';
+
+// ── Map navigator: flies to given coords when they change ──────────────────────
+function MapFlyTo({ coords }: { coords: [number, number] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (coords) map.flyTo(coords, 15, { duration: 1.2 });
+  }, [coords, map]);
+  return null;
+}
+
+// ── Nominatim location search hook ────────────────────────────────────────────
+function useLocationSearch() {
+  const [query, setQuery]       = useState('');
+  const [results, setResults]   = useState<{ label: string; lat: number; lng: number }[]>([]);
+  const [loading, setLoading]   = useState(false);
+  const debounceRef             = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (query.trim().length < 3) { setResults([]); return; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res  = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&addressdetails=1&limit=6&countrycodes=in`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = await res.json();
+        setResults(data.map((d: any) => ({ label: d.display_name, lat: parseFloat(d.lat), lng: parseFloat(d.lon) })));
+      } catch { setResults([]); }
+      finally { setLoading(false); }
+    }, 350);
+  }, [query]);
+
+  return { query, setQuery, results, setResults, loading };
+}
 
 const restaurantIcon = L.divIcon({
   className: '',
@@ -39,6 +75,11 @@ export default function Geofencing() {
   const [fssaiVerified, setFssaiVerified] = useState(false);
   const [fssaiNumber, setFssaiNumber] = useState('');
   const [savingFssai, setSavingFssai] = useState(false);
+
+  // Location search
+  const { query: locQuery, setQuery: setLocQuery, results: locResults, setResults: setLocResults, loading: locLoading } = useLocationSearch();
+  const [flyTo, setFlyTo]           = useState<[number, number] | null>(null);
+  const [showLocDropdown, setShowLocDropdown] = useState(false);
 
   // Polygon drawing
   const [drawMode, setDrawMode]     = useState(false);
@@ -164,6 +205,38 @@ export default function Geofencing() {
 
         {/* Map + editor */}
         <div className="flex-1 flex flex-col gap-3">
+
+          {/* Location Search */}
+          <div className="relative">
+            <div className="flex items-center gap-2 bg-white border-2 border-gray-200 rounded-xl px-3 py-2.5 focus-within:border-brand transition-colors">
+              {locLoading ? <Loader2 size={16} className="text-gray-400 animate-spin shrink-0" /> : <Search size={16} className="text-gray-400 shrink-0" />}
+              <input
+                value={locQuery}
+                onChange={e => { setLocQuery(e.target.value); setShowLocDropdown(true); }}
+                onFocus={() => setShowLocDropdown(true)}
+                placeholder="Search location to navigate map (e.g. Hanamkonda, Warangal)..."
+                className="flex-1 text-sm outline-none text-gray-700 placeholder-gray-400 bg-transparent"
+              />
+              {locQuery && (
+                <button onClick={() => { setLocQuery(''); setLocResults([]); setShowLocDropdown(false); }}
+                  className="p-0.5 rounded-full hover:bg-gray-100">
+                  <X size={14} className="text-gray-400" />
+                </button>
+              )}
+            </div>
+            {showLocDropdown && locResults.length > 0 && (
+              <div className="absolute top-full left-0 right-0 z-50 bg-white border border-gray-200 rounded-xl shadow-xl mt-1 overflow-hidden">
+                {locResults.map((r, i) => (
+                  <button key={i} onMouseDown={e => { e.preventDefault(); setFlyTo([r.lat, r.lng]); setLocQuery(r.label.split(',')[0]); setShowLocDropdown(false); setLocResults([]); }}
+                    className="w-full text-left px-4 py-3 text-sm hover:bg-orange-50 border-b border-gray-50 last:border-0 flex items-center gap-2">
+                    <MapPin size={13} className="text-brand shrink-0 mt-0.5" />
+                    <span className="line-clamp-1 text-gray-700">{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           {selected && (
             <>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
@@ -284,6 +357,7 @@ export default function Geofencing() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
+              <MapFlyTo coords={flyTo} />
               <PolygonDrawer drawing={drawMode} onPoint={addPoint} />
               {/* Live polygon being drawn */}
               {polyPoints.length >= 2 && (
