@@ -8,7 +8,7 @@ import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   PhoneCall, Search, Phone, Clock, Package, User,
-  Shield, X, ChevronDown,
+  Shield, X, ChevronDown, Eye,
 } from 'lucide-react';
 
 interface CustomerRow {
@@ -66,6 +66,7 @@ export default function CustomerCare() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null);
   const [agentPhone, setAgentPhone]       = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
+  const [viewProfile, setViewProfile]     = useState<CustomerRow | null>(null);
 
   // Load customers from Firestore users collection
   useEffect(() => {
@@ -287,17 +288,22 @@ export default function CustomerCare() {
                           )}
                         </td>
                         <td className="table-cell">
-                          {c.phone ? (
+                          <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => openCallSheet(c)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 border border-green-200"
+                              onClick={e => { e.stopPropagation(); setViewProfile(c); }}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100 border border-blue-200"
                             >
-                              <Shield className="w-3 h-3" />
-                              Call (Masked)
+                              <User className="w-3 h-3" /> Profile
                             </button>
-                          ) : (
-                            <span className="text-xs text-gray-400">No phone</span>
-                          )}
+                            {c.phone && (
+                              <button
+                                onClick={e => { e.stopPropagation(); openCallSheet(c); }}
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-green-50 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 border border-green-200"
+                              >
+                                <Shield className="w-3 h-3" /> Call
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </motion.tr>
                     ))}
@@ -488,6 +494,62 @@ export default function CustomerCare() {
               <p className="text-center text-xs text-gray-400 mt-3">
                 MSG91 calls you first → when you pick up → connects to the customer
               </p>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* View Profile Modal */}
+      <AnimatePresence>
+        {viewProfile && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-40" onClick={() => setViewProfile(null)} />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 max-w-md mx-auto bg-white rounded-2xl shadow-2xl p-6 max-h-[80vh] overflow-y-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-lg font-black text-gray-800">Customer Profile</h2>
+                <button onClick={() => setViewProfile(null)} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center gap-4 mb-5">
+                <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center text-2xl font-black text-brand">
+                  {viewProfile.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h3 className="font-black text-gray-900 text-lg">{viewProfile.name}</h3>
+                  {viewProfile.email && <p className="text-sm text-gray-400">{viewProfile.email}</p>}
+                </div>
+              </div>
+              <div className="space-y-3 text-sm">
+                {[
+                  ['Phone', viewProfile.phone ? formatPhone(viewProfile.phone) : '—'],
+                  ['Total Orders', String(viewProfile.totalOrders)],
+                  ['Last Order', viewProfile.lastOrderId ? `#${viewProfile.lastOrderId.slice(-8).toUpperCase()}` : '—'],
+                  ['Last Order Status', viewProfile.lastOrderStatus || '—'],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between bg-gray-50 rounded-xl px-4 py-3">
+                    <span className="text-gray-400 font-bold">{k}</span>
+                    <span className="font-black text-gray-800">{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 flex gap-2">
+                {viewProfile.phone && (
+                  <button onClick={() => { setViewProfile(null); openCallSheet(viewProfile); }}
+                    className="flex-1 py-2.5 bg-green-600 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2">
+                    <Shield className="w-4 h-4" /> Call (Masked)
+                  </button>
+                )}
+                <button onClick={() => setViewProfile(null)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl text-sm">
+                  Close
+                </button>
+              </div>
             </motion.div>
           </>
         )}

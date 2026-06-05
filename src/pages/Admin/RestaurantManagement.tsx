@@ -121,6 +121,8 @@ const addRestaurantSchema = z.object({
   address: z.string().min(5, 'Enter full address').max(300),
   fssai: z.string().optional(),
   bankAccount: z.string().optional(),
+  accountHolderName: z.string().optional(),
+  ifscCode: z.string().optional(),
   openingHours: z.string().optional(),
 });
 
@@ -131,6 +133,8 @@ const editRestaurantSchema = z.object({
   address: z.string().min(5).max(300),
   fssai: z.string().optional(),
   bankAccount: z.string().optional(),
+  accountHolderName: z.string().optional(),
+  ifscCode: z.string().optional(),
   openingHours: z.string().optional(),
 });
 
@@ -405,8 +409,10 @@ function AddRestaurantModal({
                 { name: 'email', label: 'Owner Email *', placeholder: 'owner@restaurant.com', type: 'email' },
                 { name: 'phone', label: 'Phone Number *', placeholder: '9876543210', type: 'tel' },
                 { name: 'fssai', label: 'FSSAI License (Optional)', placeholder: '12345678901234', type: 'text' },
-                { name: 'bankAccount', label: 'Bank Account (Optional)', placeholder: 'Account Number', type: 'text' },
-                { name: 'openingHours', label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
+                { name: 'bankAccount',       label: 'Bank Account Number',    placeholder: 'Account Number',      type: 'text' },
+                { name: 'accountHolderName', label: 'Account Holder Name',     placeholder: 'As per bank records', type: 'text' },
+                { name: 'ifscCode',          label: 'IFSC Code',                placeholder: 'e.g. SBIN0001234',    type: 'text' },
+                { name: 'openingHours',      label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
               ].map(field => (
                 <div key={field.name}>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -524,8 +530,10 @@ function EditRestaurantModal({
         phone: restaurant.phone,
         address: restaurant.address,
         fssai: (restaurant as any).fssai || '',
-        bankAccount: (restaurant as any).bankAccount || '',
-        openingHours: (restaurant as any).openingHours || '',
+        bankAccount:        (restaurant as any).bankAccount        || '',
+        accountHolderName:  (restaurant as any).accountHolderName  || '',
+        ifscCode:           (restaurant as any).ifscCode           || '',
+        openingHours:       (restaurant as any).openingHours       || '',
       });
       setLocationCoords(
         restaurant.lat && restaurant.lng
@@ -548,9 +556,11 @@ function EditRestaurantModal({
         email: data.email,
         lat: locationCoords?.lat ?? null,
         lng: locationCoords?.lng ?? null,
-        fssai: data.fssai || '',
-        bankAccount: data.bankAccount || '',
-        openingHours: data.openingHours || '',
+        fssai:              data.fssai              || '',
+        bankAccount:        data.bankAccount        || '',
+        accountHolderName:  data.accountHolderName  || '',
+        ifscCode:           data.ifscCode           || '',
+        openingHours:       data.openingHours       || '',
         updatedAt: serverTimestamp(),
       });
 
@@ -608,8 +618,10 @@ function EditRestaurantModal({
                 { name: 'email', label: 'Owner Email *', placeholder: 'owner@restaurant.com', type: 'email' },
                 { name: 'phone', label: 'Phone Number *', placeholder: '9876543210', type: 'tel' },
                 { name: 'fssai', label: 'FSSAI License (Optional)', placeholder: '12345678901234', type: 'text' },
-                { name: 'bankAccount', label: 'Bank Account (Optional)', placeholder: 'Account Number', type: 'text' },
-                { name: 'openingHours', label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
+                { name: 'bankAccount',       label: 'Bank Account Number',    placeholder: 'Account Number',      type: 'text' },
+                { name: 'accountHolderName', label: 'Account Holder Name',     placeholder: 'As per bank records', type: 'text' },
+                { name: 'ifscCode',          label: 'IFSC Code',                placeholder: 'e.g. SBIN0001234',    type: 'text' },
+                { name: 'openingHours',      label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
               ].map(field => (
                 <div key={field.name}>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">

@@ -20,7 +20,7 @@ function downloadCSV(rows: (string | number)[][], filename: string) {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Period = 'daily' | 'weekly' | 'monthly';
+type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 interface KPIs {
   totalRevenue: number;
@@ -31,6 +31,9 @@ interface KPIs {
   platformFees: number;
   deliveryFees: number;
   taxes: number;
+  restaurantRevenue: number;
+  riderPayouts: number;
+  refundAmount: number;
 }
 
 interface TopRestaurant { id: string; name: string; orders: number; earnings: number; rating: number; }
@@ -84,6 +87,26 @@ function buildSalesChart(orders: any[], period: Period) {
     });
   }
 
+  if (period === 'yearly') {
+    // Last 5 years
+    return Array.from({ length: 5 }, (_, i) => {
+      const year = now.getFullYear() - (4 - i);
+      return {
+        name: String(year),
+        sales: orders
+          .filter(o => {
+            const od = o.createdAt?.toDate?.();
+            return od && o.status === 'delivered' && od.getFullYear() === year;
+          })
+          .reduce((s, o) => s + (o.totalAmount || 0), 0),
+        orders: orders.filter(o => {
+          const od = o.createdAt?.toDate?.();
+          return od && od.getFullYear() === year;
+        }).length,
+      };
+    });
+  }
+
   // Monthly — last 12 months
   return Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
@@ -126,6 +149,7 @@ export default function Analytics() {
   const [kpis, setKpis] = useState<KPIs>({
     totalRevenue: 0, totalOrders: 0, totalCustomers: 0,
     totalRestaurants: 0, totalRiders: 0, platformFees: 0, deliveryFees: 0, taxes: 0,
+    restaurantRevenue: 0, riderPayouts: 0, refundAmount: 0,
   });
   const [topRestaurants, setTopRestaurants] = useState<TopRestaurant[]>([]);
   const [topRiders, setTopRiders] = useState<TopRider[]>([]);
@@ -167,7 +191,18 @@ export default function Analytics() {
         if (role === 'rider') riders++;
       });
 
-      setKpis({ totalRevenue: revenue, totalOrders: orders.length, totalCustomers: customers, totalRestaurants: restSnap.size, totalRiders: riders, platformFees, deliveryFees, taxes });
+      // Restaurant Revenue = total - platform - delivery - tax
+      const restaurantRevenue = Math.max(0, revenue - platformFees - deliveryFees - taxes);
+      // Rider payouts = sum of deliveryFees paid to riders
+      const riderPayouts = deliveryFees;
+      // Refund amount from refundHistory collection
+      let refundAmount = 0;
+      try {
+        const refundSnap = await getDocs(collection(db, 'refundHistory'));
+        refundSnap.forEach(d => { refundAmount += (d.data().refundAmount ?? 0); });
+      } catch {}
+
+      setKpis({ totalRevenue: revenue, totalOrders: orders.length, totalCustomers: customers, totalRestaurants: restSnap.size, totalRiders: riders, platformFees, deliveryFees, taxes, restaurantRevenue, riderPayouts, refundAmount });
 
       // Top Restaurants by orders
       const restMap = new Map<string, TopRestaurant>();
@@ -346,12 +381,15 @@ export default function Analytics() {
   ].filter(d => d.value > 0);
 
   const statCards = [
-    { label: 'Total Revenue', value: `₹${kpis.totalRevenue.toLocaleString('en-IN')}`, icon: DollarSign, color: 'brand', change: '+12%', bg: 'bg-orange-50', iconColor: 'text-brand' },
-    { label: 'Total Orders', value: kpis.totalOrders, icon: ShoppingBag, color: 'blue-500', change: '+8%', bg: 'bg-blue-50', iconColor: 'text-blue-500' },
-    { label: 'Customers', value: kpis.totalCustomers, icon: Users, color: 'purple-500', change: '+24%', bg: 'bg-purple-50', iconColor: 'text-purple-500' },
-    { label: 'Restaurants', value: kpis.totalRestaurants, icon: Store, color: 'green-500', change: '', bg: 'bg-green-50', iconColor: 'text-green-500' },
-    { label: 'Active Riders', value: kpis.totalRiders, icon: Bike, color: 'yellow-500', change: '', bg: 'bg-yellow-50', iconColor: 'text-yellow-600' },
-    { label: 'Platform Fees', value: `₹${kpis.platformFees.toLocaleString('en-IN')}`, icon: TrendingUp, color: 'red-500', change: '', bg: 'bg-red-50', iconColor: 'text-red-500' },
+    { label: 'Total Revenue',      value: `₹${kpis.totalRevenue.toLocaleString('en-IN')}`,       icon: DollarSign,  bg: 'bg-orange-50',  iconColor: 'text-brand'      },
+    { label: 'Total Orders',       value: kpis.totalOrders,                                       icon: ShoppingBag, bg: 'bg-blue-50',    iconColor: 'text-blue-500'   },
+    { label: 'Platform Fee',       value: `₹${kpis.platformFees.toLocaleString('en-IN')}`,        icon: TrendingUp,  bg: 'bg-purple-50',  iconColor: 'text-purple-500' },
+    { label: 'Restaurant Revenue', value: `₹${kpis.restaurantRevenue.toLocaleString('en-IN')}`,   icon: Store,       bg: 'bg-green-50',   iconColor: 'text-green-500'  },
+    { label: 'Rider Payouts',      value: `₹${kpis.riderPayouts.toLocaleString('en-IN')}`,        icon: Bike,        bg: 'bg-yellow-50',  iconColor: 'text-yellow-600' },
+    { label: 'Refund Amount',      value: `₹${kpis.refundAmount.toLocaleString('en-IN')}`,        icon: RefreshCw,   bg: 'bg-red-50',     iconColor: 'text-red-500'    },
+    { label: 'Customers',          value: kpis.totalCustomers,                                     icon: Users,       bg: 'bg-pink-50',    iconColor: 'text-pink-500'   },
+    { label: 'Restaurants',        value: kpis.totalRestaurants,                                   icon: Store,       bg: 'bg-emerald-50', iconColor: 'text-emerald-500'},
+    { label: 'Active Riders',      value: kpis.totalRiders,                                        icon: Bike,        bg: 'bg-cyan-50',    iconColor: 'text-cyan-500'   },
   ];
 
   if (loading) {
@@ -433,7 +471,7 @@ export default function Analytics() {
       </motion.div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-9 gap-4">
         {statCards.map((card, i) => (
           <motion.div
             key={card.label}
@@ -448,8 +486,8 @@ export default function Analytics() {
             </div>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-0.5">{card.label}</p>
             <p className="text-xl font-black text-gray-800">{card.value}</p>
-            {card.change && (
-              <span className="text-xs font-bold text-green-500 bg-green-50 px-1.5 py-0.5 rounded-md mt-1 inline-block">{card.change}</span>
+            {(card as any).change && (
+              <span className="text-xs font-bold text-green-500 bg-green-50 px-1.5 py-0.5 rounded-md mt-1 inline-block">{(card as any).change}</span>
             )}
           </motion.div>
         ))}
@@ -465,7 +503,7 @@ export default function Analytics() {
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-bold text-gray-800">Sales Trend</h3>
           <div className="flex bg-gray-100 p-1 rounded-xl gap-1">
-            {(['daily', 'weekly', 'monthly'] as Period[]).map(p => (
+            {(['daily', 'weekly', 'monthly', 'yearly'] as Period[]).map(p => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}

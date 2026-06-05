@@ -73,6 +73,13 @@ export default function LiveOrdersMap() {
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [heatMode, setHeatMode] = useState(false);
 
+  // Filters
+  const [showRestaurants, setShowRestaurants] = useState(true);
+  const [showRiders, setShowRiders]           = useState(true);
+  const [showCustomers, setShowCustomers]     = useState(true);
+  const [filterSearch, setFilterSearch]       = useState('');
+  const [filterStatus, setFilterStatus]       = useState<string>('all');
+
   // Active orders listener
   useEffect(() => {
     const q = query(collection(db, 'orders'), where('status', 'in', ACTIVE_STATUSES));
@@ -125,6 +132,14 @@ export default function LiveOrdersMap() {
 
   const onlineRiders = riders.filter(r => r.isOnline).length;
 
+  // Filtered orders by search + status
+  const filteredOrders = useMemo(() => enrichedOrders.filter(o => {
+    const matchStatus = filterStatus === 'all' || o.status === filterStatus;
+    const q = filterSearch.toLowerCase();
+    const matchSearch = !q || o.restaurantName?.toLowerCase().includes(q) || o.customerName?.toLowerCase().includes(q) || o.riderName?.toLowerCase().includes(q) || o.id.toLowerCase().includes(q);
+    return matchStatus && matchSearch;
+  }), [enrichedOrders, filterStatus, filterSearch]);
+
   // Heat map points with density calculation
   const heatMapPoints = useMemo(() => {
     const points = enrichedOrders
@@ -156,7 +171,34 @@ export default function LiveOrdersMap() {
             {enrichedOrders.length} active orders · {onlineRiders} rider{onlineRiders !== 1 ? 's' : ''} online
           </p>
         </div>
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Search filter */}
+          <input
+            value={filterSearch}
+            onChange={e => setFilterSearch(e.target.value)}
+            placeholder="Search restaurant, rider, customer..."
+            className="text-xs border border-gray-200 rounded-xl px-3 py-1.5 outline-none focus:border-brand w-52"
+          />
+          {/* Status filter */}
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            className="text-xs border border-gray-200 rounded-xl px-3 py-1.5 outline-none focus:border-brand">
+            <option value="all">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="preparing">Preparing</option>
+            <option value="out_for_delivery">Out for Delivery</option>
+          </select>
+          {/* Layer toggles */}
+          {[
+            { label: '🍱 Restaurants', value: showRestaurants, set: setShowRestaurants },
+            { label: '🛵 Riders',      value: showRiders,      set: setShowRiders      },
+            { label: '🏠 Customers',   value: showCustomers,   set: setShowCustomers   },
+          ].map(({ label, value, set }) => (
+            <button key={label} onClick={() => set(v => !v)}
+              className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${value ? 'bg-brand text-white border-brand' : 'border-gray-200 text-gray-500'}`}>
+              {label}
+            </button>
+          ))}
           <button
             onClick={() => setHeatMode(!heatMode)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${heatMode ? 'bg-red-500 text-white border-red-500' : 'border-gray-200 text-gray-600 hover:border-red-400 hover:text-red-500'}`}
@@ -207,7 +249,7 @@ export default function LiveOrdersMap() {
             })}
 
             {/* Per-order restaurant + customer markers */}
-            {enrichedOrders.map(order => {
+            {filteredOrders.map(order => {
               const hasRestaurant = !!(order.restaurantLat && order.restaurantLng);
               const custLat = order.deliveryAddress?.lat ?? order.deliveryLat;
               const custLng = order.deliveryAddress?.lng ?? order.deliveryLng;
@@ -221,7 +263,7 @@ export default function LiveOrdersMap() {
 
               return (
                 <React.Fragment key={order.id}>
-                  {restPos && (
+                  {restPos && showRestaurants && (
                     <Marker
                       position={restPos}
                       icon={restaurantIcon}
@@ -239,7 +281,7 @@ export default function LiveOrdersMap() {
                     </Marker>
                   )}
 
-                  {custPos && (
+                  {custPos && showCustomers && (
                     <Marker position={custPos} icon={customerIcon}>
                       <Popup>
                         <div className="text-sm">
@@ -266,7 +308,7 @@ export default function LiveOrdersMap() {
             })}
 
             {/* Rider markers */}
-            {riders.map(rider => (
+            {showRiders && riders.map(rider => (
               <Marker key={rider.id} position={[rider.lat, rider.lng]} icon={riderIcon}>
                 <Popup>
                   <div className="text-sm">

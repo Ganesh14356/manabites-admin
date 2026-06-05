@@ -10,7 +10,7 @@ import { DollarSign, CheckCircle, Clock, Store, Bike, RefreshCw, Plus, X, AlertT
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type PayoutStatus = 'pending' | 'paid';
+type PayoutStatus = 'pending' | 'paid' | 'rejected';
 type EntityType = 'restaurant' | 'rider';
 
 interface PayoutDoc {
@@ -179,8 +179,8 @@ export default function Payouts() {
       {/* Filters */}
       <div className="flex gap-3 mb-5 flex-wrap">
         <div className="flex bg-gray-100 p-1 rounded-xl">
-          {(['pending', 'paid', 'all'] as const).map(f => (
-            <button key={f} onClick={() => setStatusFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${statusFilter === f ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+          {(['all', 'pending', 'paid', 'rejected'] as const).map(f => (
+            <button key={f} onClick={() => setStatusFilter(f as any)} className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${statusFilter === f ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
               {f}
             </button>
           ))}
@@ -231,6 +231,10 @@ export default function Payouts() {
                           <span className="flex items-center gap-1 text-green-700 font-bold text-xs bg-green-100 px-2.5 py-1 rounded-full w-fit">
                             <CheckCircle className="w-3.5 h-3.5" /> Paid
                           </span>
+                        ) : p.status === 'rejected' ? (
+                          <span className="flex items-center gap-1 text-red-700 font-bold text-xs bg-red-100 px-2.5 py-1 rounded-full w-fit">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Rejected
+                          </span>
                         ) : (
                           <span className="flex items-center gap-1 text-yellow-700 font-bold text-xs bg-yellow-100 px-2.5 py-1 rounded-full w-fit">
                             <Clock className="w-3.5 h-3.5" /> Pending
@@ -242,15 +246,31 @@ export default function Payouts() {
                       </td>
                       <td className="table-cell">
                         {p.status === 'pending' && (
-                          <button
-                            onClick={() => { setMarkingPaid(p); setTxId(''); }}
-                            className="px-3 py-1.5 bg-brand text-white text-xs font-bold rounded-lg hover:bg-brand-dark transition-colors"
-                          >
-                            Mark Paid
-                          </button>
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => { setMarkingPaid(p); setTxId(''); }}
+                              className="px-3 py-1.5 bg-brand text-white text-xs font-bold rounded-lg hover:bg-brand-dark transition-colors"
+                            >
+                              Mark Paid
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await updateDoc(doc(db, 'payouts', p.id), { status: 'rejected', rejectedAt: serverTimestamp() });
+                                  toast.success('Payout rejected');
+                                } catch { toast.error('Failed'); }
+                              }}
+                              className="px-3 py-1.5 bg-red-100 text-red-700 text-xs font-bold rounded-lg hover:bg-red-200 transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </div>
                         )}
                         {p.status === 'paid' && p.paidAt && (
-                          <span className="text-xs text-gray-400">{formatDate(p.paidAt)}</span>
+                          <div>
+                            <span className="text-xs text-gray-400">{formatDate(p.paidAt)}</span>
+                            {p.transactionId && <p className="text-xs font-mono text-green-600">{p.transactionId}</p>}
+                          </div>
                         )}
                       </td>
                     </motion.tr>

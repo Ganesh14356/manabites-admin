@@ -81,6 +81,8 @@ interface EarningEntry {
   restaurantName: string;
   customerName: string;
   deliveryFeeEarned: number;
+  deliveryFee?: number;
+  amount?: number;
   distance: number;
   createdAt: any;
 }
@@ -337,6 +339,9 @@ export default function RiderManagement() {
   const [earnings, setEarnings] = useState<EarningEntry[]>([]);
   const [earningsLoading, setEarningsLoading] = useState(false);
   const [totalEarnings, setTotalEarnings] = useState(0);
+  const [earnPeriod, setEarnPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('monthly');
+  const [earnFrom, setEarnFrom] = useState('');
+  const [earnTo, setEarnTo]     = useState('');
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<RiderFormData>({
     resolver: zodResolver(riderSchema),
@@ -907,11 +912,50 @@ export default function RiderManagement() {
 
           {selectedRiderForEarnings && (
             <>
+              {/* Earnings period filter */}
+              <div className="bg-white rounded-2xl shadow-card p-4 flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-bold text-gray-500">Filter:</span>
+                <div className="flex bg-gray-100 p-0.5 rounded-xl">
+                  {(['daily','weekly','monthly','custom'] as const).map(p => (
+                    <button key={p} onClick={() => setEarnPeriod(p)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold capitalize transition-all ${earnPeriod === p ? 'bg-white shadow text-brand' : 'text-gray-500 hover:text-gray-700'}`}>
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                {earnPeriod === 'custom' && (
+                  <div className="flex items-center gap-2">
+                    <input type="date" value={earnFrom} onChange={e => setEarnFrom(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-brand" />
+                    <span className="text-gray-400 text-xs">to</span>
+                    <input type="date" value={earnTo} onChange={e => setEarnTo(e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-brand" />
+                  </div>
+                )}
+              </div>
+
+              {(() => {
+                const now = new Date();
+                const filterEarnings = earnings.filter(e => {
+                  const d = e.createdAt?.toDate?.() ?? (e.createdAt ? new Date(e.createdAt) : null);
+                  if (!d) return true;
+                  if (earnPeriod === 'daily') { const t = new Date(now); t.setHours(0,0,0,0); return d >= t; }
+                  if (earnPeriod === 'weekly') { const t = new Date(now); t.setDate(t.getDate() - 7); return d >= t; }
+                  if (earnPeriod === 'monthly') { const t = new Date(now); t.setMonth(t.getMonth() - 1); return d >= t; }
+                  if (earnPeriod === 'custom' && earnFrom) {
+                    const from = new Date(earnFrom); const to = earnTo ? new Date(earnTo + 'T23:59:59') : now;
+                    return d >= from && d <= to;
+                  }
+                  return true;
+                });
+                const filteredTotal = filterEarnings.reduce((s, e) => s + (e.deliveryFee || e.amount || 0), 0);
+
+                return (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {[
-                  { label: 'Total Earned', value: `₹${totalEarnings.toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
-                  { label: 'Deliveries', value: earnings.length, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-50' },
-                  { label: 'Avg per Delivery', value: earnings.length ? `₹${(totalEarnings / earnings.length).toFixed(0)}` : '—', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
+                  { label: `${earnPeriod === 'daily' ? 'Today' : earnPeriod === 'weekly' ? 'This Week' : earnPeriod === 'monthly' ? 'This Month' : 'Period'} Earned`, value: `₹${filteredTotal.toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-50' },
+                  { label: 'Deliveries', value: filterEarnings.length, icon: ShoppingBag, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { label: 'Avg per Delivery', value: filterEarnings.length ? `₹${(filteredTotal / filterEarnings.length).toFixed(0)}` : '—', icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
                 ].map(s => (
                   <div key={s.label} className="bg-white rounded-2xl shadow-card p-5">
                     <div className={`w-9 h-9 ${s.bg} rounded-xl flex items-center justify-center mb-3`}>
@@ -921,10 +965,13 @@ export default function RiderManagement() {
                     <p className="text-2xl font-black text-gray-800 mt-0.5">{s.value}</p>
                   </div>
                 ))}
-              </div>
+              </div>);
+              })()}
+
               <div className="bg-white rounded-2xl shadow-card overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-100">
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
                   <h3 className="font-bold text-gray-800">Delivery History — {selectedRiderForEarnings.name || selectedRiderForEarnings.phone}</h3>
+                  <span className="text-xs text-gray-400 capitalize">{earnPeriod} filter</span>
                 </div>
                 {earningsLoading ? (
                   <div className="p-8 text-center text-gray-400">Loading...</div>
@@ -948,7 +995,7 @@ export default function RiderManagement() {
                             <td className="table-cell font-mono text-xs text-gray-500">{e.orderId.slice(0, 8).toUpperCase()}</td>
                             <td className="table-cell font-semibold text-gray-800">{e.restaurantName}</td>
                             <td className="table-cell text-gray-600">{e.customerName}</td>
-                            <td className="table-cell font-bold text-green-600">₹{e.deliveryFeeEarned.toFixed(2)}</td>
+                            <td className="table-cell font-bold text-green-600">₹{(e.deliveryFee || e.amount || e.deliveryFeeEarned || 0).toFixed(2)}</td>
                             <td className="table-cell text-gray-400 text-xs">{formatDate(e.createdAt)}</td>
                           </tr>
                         ))}

@@ -5,8 +5,14 @@ import {
   getDocs, deleteDoc, doc, updateDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Star, Trash2, EyeOff, Eye, Search, Flag, ChevronDown } from 'lucide-react';
+import { Star, Trash2, EyeOff, Eye, Search, Flag, ChevronDown, TrendingUp, TrendingDown, Smile, Frown } from 'lucide-react';
 import toast from 'react-hot-toast';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, PieChart, Pie, Cell, Legend,
+} from 'recharts';
+
+type ReviewPeriod = 'daily' | 'weekly' | 'monthly';
 
 interface Review {
   id: string;
@@ -53,6 +59,8 @@ export default function ReviewsManagement() {
   const [flagFilter, setFlagFilter]   = useState<'all' | 'flagged' | 'hidden'>('all');
   const [restFilter, setRestFilter]   = useState('all');
   const [actionTarget, setActionTarget] = useState<Review | null>(null);
+  const [reviewPeriod, setReviewPeriod]  = useState<ReviewPeriod>('weekly');
+  const [showAnalytics, setShowAnalytics] = useState(true);
 
   // Load all restaurants to get their names
   useEffect(() => {
@@ -149,31 +157,169 @@ export default function ReviewsManagement() {
     : '—';
   const flaggedCount = reviews.filter(r => r.isFlagged).length;
   const lowRatings   = reviews.filter(r => r.rating <= 2).length;
+  const positive     = reviews.filter(r => r.rating >= 4).length;
+  const negative     = reviews.filter(r => r.rating <= 2).length;
+  const neutral      = reviews.length - positive - negative;
+
+  // Sentiment: positive keywords
+  const sentimentScore = useMemo(() => {
+    const posWords = ['great', 'excellent', 'amazing', 'good', 'love', 'perfect', 'best', 'tasty', 'fresh', 'quick'];
+    const negWords = ['bad', 'worst', 'terrible', 'awful', 'cold', 'slow', 'wrong', 'missing', 'never', 'poor'];
+    let pos = 0, neg = 0;
+    reviews.forEach(r => {
+      const text = (r.comment || '').toLowerCase();
+      posWords.forEach(w => { if (text.includes(w)) pos++; });
+      negWords.forEach(w => { if (text.includes(w)) neg++; });
+    });
+    return { pos, neg, total: pos + neg };
+  }, [reviews]);
+
+  // Chart data by period
+  const reviewChartData = useMemo(() => {
+    const now = new Date();
+    if (reviewPeriod === 'daily') {
+      return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(now); d.setDate(d.getDate() - (6 - i));
+        const dayReviews = reviews.filter(r => {
+          const rd = r.createdAt?.toDate?.();
+          return rd && rd.toDateString() === d.toDateString();
+        });
+        return {
+          name: d.toLocaleDateString('en-IN', { weekday: 'short' }),
+          count: dayReviews.length,
+          avg: dayReviews.length > 0 ? +(dayReviews.reduce((s, r) => s + r.rating, 0) / dayReviews.length).toFixed(1) : 0,
+          positive: dayReviews.filter(r => r.rating >= 4).length,
+          negative: dayReviews.filter(r => r.rating <= 2).length,
+        };
+      });
+    }
+    if (reviewPeriod === 'weekly') {
+      return Array.from({ length: 8 }, (_, i) => {
+        const weekStart = new Date(now); weekStart.setDate(weekStart.getDate() - weekStart.getDay() - (7 - i) * 7); weekStart.setHours(0,0,0,0);
+        const weekEnd   = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6);
+        const weekReviews = reviews.filter(r => { const rd = r.createdAt?.toDate?.(); return rd && rd >= weekStart && rd <= weekEnd; });
+        return {
+          name: `W${8-i}`,
+          count: weekReviews.length,
+          avg: weekReviews.length > 0 ? +(weekReviews.reduce((s, r) => s + r.rating, 0) / weekReviews.length).toFixed(1) : 0,
+          positive: weekReviews.filter(r => r.rating >= 4).length,
+          negative: weekReviews.filter(r => r.rating <= 2).length,
+        };
+      });
+    }
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+      const monthReviews = reviews.filter(r => { const rd = r.createdAt?.toDate?.(); return rd && rd.getMonth() === d.getMonth() && rd.getFullYear() === d.getFullYear(); });
+      return {
+        name: d.toLocaleDateString('en-IN', { month: 'short' }),
+        count: monthReviews.length,
+        avg: monthReviews.length > 0 ? +(monthReviews.reduce((s, r) => s + r.rating, 0) / monthReviews.length).toFixed(1) : 0,
+        positive: monthReviews.filter(r => r.rating >= 4).length,
+        negative: monthReviews.filter(r => r.rating <= 2).length,
+      };
+    });
+  }, [reviews, reviewPeriod]);
+
+  const ratingDist = [5,4,3,2,1].map(r => ({
+    name: `${r}★`, value: reviews.filter(rv => rv.rating === r).length
+  }));
+  const COLORS = ['#22c55e', '#84cc16', '#f59e0b', '#f97316', '#ef4444'];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-black text-gray-900">Reviews Management</h1>
         <p className="text-sm text-gray-500 font-medium mt-0.5">Moderate customer reviews across all restaurants</p>
       </div>
 
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black text-gray-900">Review Analytics</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Sentiment tracking · {reviews.length} total reviews</p>
+        </div>
+        <button onClick={() => setShowAnalytics(a => !a)}
+          className={`px-4 py-2 rounded-xl text-sm font-bold border ${showAnalytics ? 'bg-brand text-white border-brand' : 'border-gray-200 text-gray-600'}`}>
+          📊 Analytics
+        </button>
+      </div>
+
       {/* Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {[
-          { label: 'Total Reviews', value: reviews.length, icon: '⭐', color: 'text-yellow-600 bg-yellow-50' },
-          { label: 'Avg Rating',    value: avgRating + ' ★', icon: '📊', color: 'text-brand bg-brand/10'  },
-          { label: 'Flagged',       value: flaggedCount, icon: '🚩', color: 'text-red-600 bg-red-50'      },
-          { label: 'Low (≤ 2★)',    value: lowRatings,   icon: '⚠️', color: 'text-orange-600 bg-orange-50'},
+          { label: 'Total',    value: reviews.length,         icon: '⭐', color: 'text-yellow-600 bg-yellow-50' },
+          { label: 'Avg',      value: avgRating + ' ★',       icon: '📊', color: 'text-brand bg-brand/10'       },
+          { label: 'Positive', value: positive,               icon: '😊', color: 'text-green-600 bg-green-50'   },
+          { label: 'Negative', value: negative,               icon: '😞', color: 'text-red-600 bg-red-50'       },
+          { label: 'Neutral',  value: neutral,                icon: '😐', color: 'text-gray-600 bg-gray-50'     },
+          { label: 'Flagged',  value: flaggedCount,           icon: '🚩', color: 'text-orange-600 bg-orange-50' },
         ].map(c => (
-          <div key={c.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 text-sm ${c.color}`}>
-              {c.icon}
-            </div>
-            <p className="text-2xl font-black text-gray-900">{c.value}</p>
+          <div key={c.label} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center mb-2 text-sm ${c.color}`}>{c.icon}</div>
+            <p className="text-xl font-black text-gray-900">{c.value}</p>
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-0.5">{c.label}</p>
           </div>
         ))}
       </div>
+
+      {/* Analytics Charts */}
+      {showAnalytics && (
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Review Trend */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black text-gray-800">Review Trend</h3>
+              <div className="flex bg-gray-100 p-0.5 rounded-xl">
+                {(['daily','weekly','monthly'] as ReviewPeriod[]).map(p => (
+                  <button key={p} onClick={() => setReviewPeriod(p)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold capitalize transition-all ${reviewPeriod === p ? 'bg-white shadow text-brand' : 'text-gray-500'}`}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={reviewChartData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }} />
+                <Bar dataKey="positive" fill="#22c55e" radius={[4,4,0,0]} name="Positive" stackId="a" />
+                <Bar dataKey="negative" fill="#ef4444" radius={[4,4,0,0]} name="Negative" stackId="a" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Rating Distribution + Sentiment */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <h3 className="font-black text-gray-800 mb-4">Rating Distribution</h3>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={ratingDist} layout="vertical" margin={{ left: 10 }}>
+                <XAxis type="number" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={25} />
+                <Tooltip />
+                {ratingDist.map((_, i) => null)}
+                <Bar dataKey="value" radius={[0,4,4,0]}>
+                  {ratingDist.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            {/* Sentiment score */}
+            <div className="mt-3 flex gap-3">
+              <div className="flex-1 bg-green-50 rounded-xl p-3">
+                <p className="text-xs font-black text-green-600 uppercase">Positive Sentiment</p>
+                <p className="text-2xl font-black text-green-700">{sentimentScore.total > 0 ? Math.round((sentimentScore.pos / sentimentScore.total) * 100) : 0}%</p>
+                <p className="text-xs text-green-500">{sentimentScore.pos} keyword matches</p>
+              </div>
+              <div className="flex-1 bg-red-50 rounded-xl p-3">
+                <p className="text-xs font-black text-red-600 uppercase">Negative Sentiment</p>
+                <p className="text-2xl font-black text-red-700">{sentimentScore.total > 0 ? Math.round((sentimentScore.neg / sentimentScore.total) * 100) : 0}%</p>
+                <p className="text-xs text-red-500">{sentimentScore.neg} keyword matches</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">

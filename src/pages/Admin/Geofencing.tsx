@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { MapContainer, TileLayer, Marker, Circle, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle, Popup, Polygon, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import toast from 'react-hot-toast';
-import { Save, MapPin, ShieldCheck } from 'lucide-react';
+import { Save, MapPin, ShieldCheck, Hexagon, X, RotateCcw } from 'lucide-react';
 
 const restaurantIcon = L.divIcon({
   className: '',
@@ -25,6 +25,12 @@ interface Restaurant {
   fssaiNumber?: string;
 }
 
+// Helper: click handler inside map to collect polygon points
+function PolygonDrawer({ drawing, onPoint }: { drawing: boolean; onPoint: (p: [number, number]) => void }) {
+  useMapEvents({ click: e => { if (drawing) onPoint([e.latlng.lat, e.latlng.lng]); } });
+  return null;
+}
+
 export default function Geofencing() {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [selected, setSelected] = useState<Restaurant | null>(null);
@@ -33,6 +39,36 @@ export default function Geofencing() {
   const [fssaiVerified, setFssaiVerified] = useState(false);
   const [fssaiNumber, setFssaiNumber] = useState('');
   const [savingFssai, setSavingFssai] = useState(false);
+
+  // Polygon drawing
+  const [drawMode, setDrawMode]     = useState(false);
+  const [polyPoints, setPolyPoints] = useState<[number, number][]>([]);
+  const [savedZones, setSavedZones] = useState<{ id: string; name: string; points: [number, number][] }[]>([]);
+
+  const addPoint = useCallback((p: [number, number]) => {
+    setPolyPoints(prev => [...prev, p]);
+  }, []);
+
+  const closePolygon = () => {
+    if (polyPoints.length < 3) { toast.error('Minimum 3 points needed'); return; }
+    // Auto-close: first point == last point
+    setPolyPoints(prev => [...prev, prev[0]]);
+    setDrawMode(false);
+  };
+
+  const saveZone = async () => {
+    if (polyPoints.length < 3) { toast.error('Draw a zone first'); return; }
+    if (!selected) { toast.error('Select a restaurant first'); return; }
+    setSaving(true);
+    try {
+      const zone = polyPoints;
+      await updateDoc(doc(db, 'restaurants', selected.id), { deliveryZone: zone, deliveryZoneType: 'polygon' });
+      setSavedZones(prev => [...prev.filter(z => z.id !== selected.id), { id: selected.id, name: selected.name, points: zone }]);
+      toast.success('Delivery zone saved ✓');
+      setPolyPoints([]);
+    } catch { toast.error('Save failed'); }
+    finally { setSaving(false); }
+  };
 
   useEffect(() => {
     return onSnapshot(collection(db, 'restaurants'), snap => {
@@ -88,7 +124,7 @@ export default function Geofencing() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-black text-gray-900">Geofencing</h1>
-        <p className="text-sm text-gray-500 font-medium mt-0.5">Set delivery radius for each restaurant</p>
+        <p className="text-sm text-gray-500 font-medium mt-0.5">Set delivery zones — circle radius or custom polygon</p>
       </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
@@ -170,6 +206,38 @@ export default function Geofencing() {
               </button>
             </div>
 
+            {/* Polygon Drawing Section */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4 flex-wrap">
+              <Hexagon size={18} className="text-purple-600 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-black text-gray-900 text-sm mb-1">Custom Delivery Zone (Polygon)</p>
+                <p className="text-xs text-gray-400">
+                  {drawMode ? `${polyPoints.length} points placed — click map to add more` : 'Draw a custom polygon delivery zone'}
+                </p>
+                {polyPoints.length > 0 && (
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    <button onClick={closePolygon} disabled={polyPoints.length < 3}
+                      className="px-3 py-1.5 text-xs font-black bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">
+                      ✓ Close Polygon
+                    </button>
+                    <button onClick={() => setPolyPoints([])}
+                      className="px-3 py-1.5 text-xs font-black bg-gray-100 text-gray-600 rounded-lg flex items-center gap-1">
+                      <RotateCcw size={12} /> Clear
+                    </button>
+                    <button onClick={saveZone} disabled={saving || polyPoints.length < 3}
+                      className="px-3 py-1.5 text-xs font-black bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1">
+                      <Save size={12} /> {saving ? 'Saving…' : 'Save Zone'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setDrawMode(d => !d)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-black text-sm transition-colors ${drawMode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}>
+                <Hexagon size={15} />
+                {drawMode ? 'Drawing… (click map)' : 'Draw Zone'}
+              </button>
+            </div>
+
             {/* FSSAI Section */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex items-center gap-4 flex-wrap">
               <ShieldCheck size={18} className="text-green-600 flex-shrink-0" />
@@ -216,6 +284,17 @@ export default function Geofencing() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
+              <PolygonDrawer drawing={drawMode} onPoint={addPoint} />
+              {/* Live polygon being drawn */}
+              {polyPoints.length >= 2 && (
+                <Polygon positions={polyPoints} pathOptions={{ color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.1, weight: 2, dashArray: '6 4' }} />
+              )}
+              {/* Saved zones */}
+              {savedZones.map(z => (
+                <Polygon key={z.id} positions={z.points} pathOptions={{ color: '#1BA94C', fillColor: '#1BA94C', fillOpacity: 0.08, weight: 2 }}>
+                  <Popup><p className="font-bold text-sm">{z.name}</p><p className="text-xs text-gray-500">Custom delivery zone</p></Popup>
+                </Polygon>
+              ))}
 
               {restaurants.filter(r => r.lat && r.lng).map(r => {
                 const pos: [number, number] = [r.lat!, r.lng!];
