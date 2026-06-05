@@ -8,11 +8,11 @@ import toast from 'react-hot-toast';
 import { Save, MapPin, ShieldCheck, Hexagon, X, RotateCcw, Search, Loader2 } from 'lucide-react';
 
 // ── Map navigator: flies to given coords when they change ──────────────────────
-function MapFlyTo({ coords }: { coords: [number, number] | null }) {
+function MapFlyTo({ target }: { target: { coords: [number, number]; ts: number } | null }) {
   const map = useMap();
   useEffect(() => {
-    if (coords) map.flyTo(coords, 15, { duration: 1.2 });
-  }, [coords, map]);
+    if (target) map.flyTo(target.coords, 15, { duration: 1.2 });
+  }, [target?.ts]); // ts changes every selection — always re-fires
   return null;
 }
 
@@ -78,7 +78,7 @@ export default function Geofencing() {
 
   // Location search
   const { query: locQuery, setQuery: setLocQuery, results: locResults, setResults: setLocResults, loading: locLoading } = useLocationSearch();
-  const [flyTo, setFlyTo]           = useState<[number, number] | null>(null);
+  const [flyTo, setFlyTo]           = useState<{ coords: [number, number]; ts: number } | null>(null);
   const [showLocDropdown, setShowLocDropdown] = useState(false);
 
   // Polygon drawing
@@ -162,10 +162,64 @@ export default function Geofencing() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-black text-gray-900">Geofencing</h1>
         <p className="text-sm text-gray-500 font-medium mt-0.5">Set delivery zones — circle radius or custom polygon</p>
+      </div>
+
+      {/* ── Location Search (above map, outside stacking context) ── */}
+      <div className="relative" style={{ zIndex: 9999 }}>
+        <div className="flex items-center gap-2 bg-white border-2 border-gray-200 rounded-xl px-4 py-3 focus-within:border-brand transition-colors shadow-sm">
+          {locLoading
+            ? <Loader2 size={16} className="text-gray-400 animate-spin shrink-0" />
+            : <Search size={16} className="text-brand shrink-0" />}
+          <input
+            value={locQuery}
+            onChange={e => { setLocQuery(e.target.value); setShowLocDropdown(true); }}
+            onFocus={() => locResults.length > 0 && setShowLocDropdown(true)}
+            onBlur={() => setTimeout(() => setShowLocDropdown(false), 200)}
+            placeholder="🔍  Location search cheyyi — e.g. Hanamkonda, Subedari, Warangal..."
+            className="flex-1 text-sm outline-none text-gray-700 placeholder-gray-400 bg-transparent font-medium"
+          />
+          {locQuery && (
+            <button onClick={() => { setLocQuery(''); setLocResults([]); setShowLocDropdown(false); }}
+              className="p-1 rounded-full hover:bg-gray-100 transition-colors">
+              <X size={14} className="text-gray-400" />
+            </button>
+          )}
+        </div>
+
+        {/* Dropdown — rendered above Leaflet map */}
+        {showLocDropdown && locResults.length > 0 && (
+          <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-2xl mt-1 overflow-hidden"
+            style={{ zIndex: 9999 }}>
+            {locResults.map((r, i) => (
+              <button
+                key={i}
+                onMouseDown={e => {
+                  e.preventDefault();
+                  setFlyTo({ coords: [r.lat, r.lng], ts: Date.now() });
+                  setLocQuery(r.label.split(',').slice(0, 2).join(', '));
+                  setShowLocDropdown(false);
+                  setLocResults([]);
+                }}
+                className="w-full text-left px-4 py-3 text-sm hover:bg-orange-50 border-b border-gray-100 last:border-0 flex items-center gap-3 transition-colors"
+              >
+                <MapPin size={14} className="text-brand shrink-0 mt-0.5" />
+                <span className="text-gray-700 line-clamp-1">{r.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Loading indicator */}
+        {locLoading && locQuery.length >= 3 && (
+          <div className="absolute top-full left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl mt-1 px-4 py-3 text-sm text-gray-400 flex items-center gap-2"
+            style={{ zIndex: 9999 }}>
+            <Loader2 size={14} className="animate-spin" /> Searching...
+          </div>
+        )}
       </div>
 
       <div className="flex gap-4 flex-1 min-h-0">
@@ -205,37 +259,6 @@ export default function Geofencing() {
 
         {/* Map + editor */}
         <div className="flex-1 flex flex-col gap-3">
-
-          {/* Location Search */}
-          <div className="relative">
-            <div className="flex items-center gap-2 bg-white border-2 border-gray-200 rounded-xl px-3 py-2.5 focus-within:border-brand transition-colors">
-              {locLoading ? <Loader2 size={16} className="text-gray-400 animate-spin shrink-0" /> : <Search size={16} className="text-gray-400 shrink-0" />}
-              <input
-                value={locQuery}
-                onChange={e => { setLocQuery(e.target.value); setShowLocDropdown(true); }}
-                onFocus={() => setShowLocDropdown(true)}
-                placeholder="Search location to navigate map (e.g. Hanamkonda, Warangal)..."
-                className="flex-1 text-sm outline-none text-gray-700 placeholder-gray-400 bg-transparent"
-              />
-              {locQuery && (
-                <button onClick={() => { setLocQuery(''); setLocResults([]); setShowLocDropdown(false); }}
-                  className="p-0.5 rounded-full hover:bg-gray-100">
-                  <X size={14} className="text-gray-400" />
-                </button>
-              )}
-            </div>
-            {showLocDropdown && locResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 z-50 bg-white border border-gray-200 rounded-xl shadow-xl mt-1 overflow-hidden">
-                {locResults.map((r, i) => (
-                  <button key={i} onMouseDown={e => { e.preventDefault(); setFlyTo([r.lat, r.lng]); setLocQuery(r.label.split(',')[0]); setShowLocDropdown(false); setLocResults([]); }}
-                    className="w-full text-left px-4 py-3 text-sm hover:bg-orange-50 border-b border-gray-50 last:border-0 flex items-center gap-2">
-                    <MapPin size={13} className="text-brand shrink-0 mt-0.5" />
-                    <span className="line-clamp-1 text-gray-700">{r.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
 
           {selected && (
             <>
@@ -357,7 +380,7 @@ export default function Geofencing() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
-              <MapFlyTo coords={flyTo} />
+              <MapFlyTo target={flyTo} />
               <PolygonDrawer drawing={drawMode} onPoint={addPoint} />
               {/* Live polygon being drawn */}
               {polyPoints.length >= 2 && (
