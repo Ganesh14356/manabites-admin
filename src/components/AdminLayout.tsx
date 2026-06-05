@@ -5,6 +5,7 @@ import {
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
+  Headphones, Receipt, Gavel, ClipboardList,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -30,9 +31,13 @@ const BASE_NAV = [
   { name: 'Reviews',              path: '/admin/reviews',              icon: Star        },
   { name: 'Rating Appeals',       path: '/admin/rating-appeals',       icon: MessageSquareWarning },
   { name: 'SOS Alerts',           path: '/admin/sos-alerts',           icon: AlertTriangle },
+  { name: 'Complaints',           path: '/admin/complaints',           icon: ClipboardList },
+  { name: 'Customer Care',        path: '/admin/customer-care',        icon: Headphones },
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
+  { name: 'Expenses',            path: '/admin/expenses',             icon: Receipt     },
+  { name: 'Fines',               path: '/admin/fines',                icon: Gavel       },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
   { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
   { name: 'Wallet & Gold',      path: '/admin/wallet',               icon: Wallet      },

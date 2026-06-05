@@ -42,6 +42,10 @@ import VerticalsHub from './pages/Admin/VerticalsHub';
 import CityManager from './pages/Admin/CityManager';
 import FranchiseManager from './pages/Admin/FranchiseManager';
 import AIInsights from './pages/Admin/AIInsights';
+import Complaints from './pages/Admin/Complaints';
+import CustomerCare from './pages/Admin/CustomerCare';
+import Expenses from './pages/Admin/Expenses';
+import Fines from './pages/Admin/Fines';
 
 export default function App() {
   return (
@@ -106,6 +110,10 @@ export default function App() {
                 <Route path="cities" element={<CityManager />} />
                 <Route path="franchises" element={<FranchiseManager />} />
                 <Route path="ai-insights" element={<AIInsights />} />
+                <Route path="complaints" element={<Complaints />} />
+                <Route path="customer-care" element={<CustomerCare />} />
+                <Route path="expenses" element={<Expenses />} />
+                <Route path="fines" element={<Fines />} />
                 {/* Legacy alias */}
                 <Route path="delivery-settings" element={<Navigate to="/admin/settings" replace />} />
               </Route>
