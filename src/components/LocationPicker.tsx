@@ -236,6 +236,13 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
       return;
     }
 
+    // Already-resolved Google result (e.g. forward-geocoded from a pasted address) — use directly, no extra round-trip.
+    if (item.lat != null && item.lng != null) {
+      setQuery(item.fullText);
+      onChange({ address: item.fullText, lat: item.lat, lng: item.lng, placeId: item.placeId, locationName: item.mainText });
+      return;
+    }
+
     // Google prediction — resolve place_id → lat/lng/formatted address via Geocoder.
     setQuery(item.fullText);
     if (!geocoderRef.current) return;
@@ -289,6 +296,34 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     onChange(result);
   }, [reverseGeocode, onChange]);
 
+  // Forward-geocode a complete address string straight to coordinates.
+  // Places Autocomplete is built for incremental-typing predictions and often
+  // returns ZERO_RESULTS for long pasted addresses with embedded landmarks —
+  // the Geocoding API is purpose-built for resolving full address strings and
+  // handles them far more precisely (verified: resolves "H No 1, 23/1, ... near
+  // Raj Hotel ... Subedari, Hanamkonda 506001" to an exact rooftop point, while
+  // Autocomplete returns nothing for the same string).
+  const geocodeAddress = useCallback((q: string): Promise<Suggestion | null> => {
+    return new Promise((resolve) => {
+      if (!geocoderRef.current) { resolve(null); return; }
+      geocoderRef.current.geocode({ address: q, componentRestrictions: { country: 'IN' } }, (results: any[] | null, status: string) => {
+        if (status !== 'OK' || !results?.[0]) { resolve(null); return; }
+        const r = results[0];
+        const loc = r.geometry.location;
+        resolve({
+          id: `geo_${r.place_id}`,
+          mainText: r.formatted_address,
+          secondaryText: '',
+          fullText: r.formatted_address,
+          source: 'google',
+          placeId: r.place_id,
+          lat: loc.lat(),
+          lng: loc.lng(),
+        });
+      });
+    });
+  }, []);
+
   // Pasted Google-style addresses often include shop names, "near X / opposite Y"
   // landmarks and house numbers that OpenStreetMap's Nominatim database doesn't
   // recognise as a single string. If the full query returns nothing, progressively
@@ -307,8 +342,20 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     setLoading(true);
     setNotFound(false);
     try {
-      // Google Places understands shop names, landmarks & typos directly — try it first.
       let results: Suggestion[] = [];
+
+      // Pasted full address → resolve directly with the Geocoding API (built for
+      // complete-address strings; Autocomplete frequently returns ZERO_RESULTS
+      // for long landmark-laden pasted addresses).
+      if (autoSelect && mapsReady && geocoderRef.current) {
+        const geocoded = await geocodeAddress(trimmed);
+        if (geocoded) {
+          handleSelect(geocoded);
+          return;
+        }
+      }
+
+      // Google Places understands shop names, landmarks & typos directly — try it first.
       if (mapsReady && autocompleteRef.current) {
         results = await googleSearch(trimmed);
       }
@@ -335,7 +382,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     } finally {
       setLoading(false);
     }
-  }, [mapsReady, googleSearch, nominatimSearch, handleSelect]);
+  }, [mapsReady, googleSearch, nominatimSearch, handleSelect, geocodeAddress]);
 
   const pastedRef = useRef(false);
 
