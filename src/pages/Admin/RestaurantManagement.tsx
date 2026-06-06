@@ -18,7 +18,7 @@ import {
 import { auth, db, secondaryAuth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { LocationPicker } from '../../components/LocationPicker';
-import { razorpay, maskAccountNumber } from '../../services/razorpay';
+import { maskAccountNumber } from '../../services/razorpay';
 import {
   Plus as FiPlus,
   Edit2 as FiEdit2,
@@ -530,50 +530,42 @@ function BankVerificationSection({
   errors: ReturnType<typeof useForm<EditFormData>>['formState']['errors'];
 }) {
   const { user } = useAuth();
-  const [verifying, setVerifying] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [showFullAccount, setShowFullAccount] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'verify' | 'fail' | null>(null);
+  const [confirmNote, setConfirmNote] = useState('');
 
   const bankAccount = watch('bankAccount', '');
   const accountHolderName = watch('accountHolderName', '');
   const ifscCode = watch('ifscCode', '');
 
   const verification: BankVerification = (restaurant as any)?.bankVerification ?? { status: 'not_verified' };
-  const canVerify = !!(bankAccount?.trim() && accountHolderName?.trim() && ifscCode?.trim()) && !verifying;
+  const hasBankDetails = !!(bankAccount?.trim() && accountHolderName?.trim() && ifscCode?.trim());
 
-  const handleVerify = async () => {
+  const openConfirm = (action: 'verify' | 'fail') => {
+    setConfirmNote('');
+    setConfirmAction(action);
+  };
+
+  // Manual verification: admin checks the bank details (cancelled cheque / passbook /
+  // a real payout) and records the outcome themselves — no automated penny-drop call.
+  const submitManualDecision = async () => {
     if (!restaurant) return;
-    setVerifying(true);
+    setSubmitting(true);
     const restRef = doc(db, 'restaurants', restaurant.id);
+    const isVerified = confirmAction === 'verify';
     try {
-      await updateDoc(restRef, {
-        bankVerification: { status: 'verifying', lastAttemptAt: serverTimestamp() },
-      });
-
-      const result = await razorpay.verifyBankAccount({
-        accountNumber: bankAccount.trim(),
-        ifsc: ifscCode.trim().toUpperCase(),
-        accountHolderName: accountHolderName.trim(),
-        restaurantId: restaurant.id,
-      });
-      const v = result.validation;
-      const isVerified = v.status === 'completed' && v.results?.account_status === 'active';
-
       const newVerification: BankVerification = isVerified
         ? {
             status: 'verified',
-            referenceId: v.id,
-            verifiedName: v.results?.registered_name || accountHolderName.trim(),
-            bankName: result.fundAccount?.bank_account?.bank_name || '',
+            verifiedName: accountHolderName.trim(),
             verifiedAt: serverTimestamp() as unknown as Timestamp,
             lastAttemptAt: serverTimestamp() as unknown as Timestamp,
+            errorMessage: confirmNote.trim() || undefined,
           }
         : {
             status: 'failed',
-            referenceId: v.id,
-            errorMessage:
-              v.status === 'failed'
-                ? 'Bank declined verification — the account may be invalid, closed or inactive.'
-                : `Verification returned an unexpected status: ${v.status}`,
+            errorMessage: confirmNote.trim() || 'Marked as failed by admin after manual review.',
             lastAttemptAt: serverTimestamp() as unknown as Timestamp,
           };
 
@@ -586,26 +578,19 @@ function BankVerificationSection({
         ifsc: ifscCode.trim().toUpperCase(),
         accountHolderName: accountHolderName.trim(),
         status: newVerification.status,
-        referenceId: v.id,
-        razorpayResult: {
-          account_status: v.results?.account_status ?? null,
-          registered_name: v.results?.registered_name ?? null,
-        },
+        method: 'manual',
+        note: confirmNote.trim() || null,
         performedBy: user?.uid ?? null,
         performedByEmail: user?.email ?? null,
         createdAt: serverTimestamp(),
       });
 
-      if (isVerified) toast.success(`Bank account verified — ${newVerification.verifiedName}`);
-      else toast.error(newVerification.errorMessage || 'Bank verification failed');
+      toast.success(isVerified ? 'Marked as verified' : 'Marked as failed');
+      setConfirmAction(null);
     } catch (err: any) {
-      const message = err?.message || 'Bank verification request failed';
-      await updateDoc(restRef, {
-        bankVerification: { status: 'failed', errorMessage: message, lastAttemptAt: serverTimestamp() },
-      }).catch(() => {});
-      toast.error(message);
+      toast.error(err?.message || 'Could not save verification status');
     } finally {
-      setVerifying(false);
+      setSubmitting(false);
     }
   };
 
@@ -672,31 +657,75 @@ function BankVerificationSection({
         <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800 space-y-1">
           <p className="flex items-center gap-1.5 font-semibold"><FiCheck className="w-3.5 h-3.5" /> Verified — account eligible for payouts</p>
           {verification.verifiedName && <p>Verified Name: <span className="font-medium">{verification.verifiedName}</span></p>}
-          {verification.bankName && <p>Bank: {verification.bankName}</p>}
           <p>Verified On: {formatDate(verification.verifiedAt)}</p>
-          {verification.referenceId && <p className="text-green-600/70">Ref: {verification.referenceId}</p>}
+          {verification.errorMessage && <p className="text-green-700/70 italic">Note: {verification.errorMessage}</p>}
         </div>
       )}
       {verification.status === 'failed' && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
-          {verification.errorMessage || 'Verification failed. Please re-check the account details and try again.'}
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 space-y-1">
+          <p className="font-semibold">Verification failed</p>
+          <p>{verification.errorMessage || 'Marked as failed by admin after manual review.'}</p>
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={handleVerify}
-        disabled={!canVerify}
-        className="w-full flex items-center justify-center gap-2 bg-brand text-white font-semibold text-sm py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand/90 transition-colors"
-      >
-        {verifying
-          ? <><FiLoader2 className="w-4 h-4 animate-spin" /> Verifying via Razorpay…</>
-          : <><FiShieldCheck className="w-4 h-4" /> Verify Account (₹1 penny-drop)</>}
-      </button>
+      {confirmAction ? (
+        <div className={`rounded-xl border p-3 space-y-2 ${confirmAction === 'verify' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+          <p className={`text-xs font-semibold ${confirmAction === 'verify' ? 'text-green-800' : 'text-red-700'}`}>
+            {confirmAction === 'verify'
+              ? `Confirm: have you manually checked "${accountHolderName || '—'}" / ${bankAccount ? maskAccountNumber(bankAccount) : '—'} / ${ifscCode || '—'} against a cancelled cheque, passbook, or a successful payout?`
+              : 'Confirm: mark this bank account as failed verification?'}
+          </p>
+          <textarea
+            value={confirmNote}
+            onChange={e => setConfirmNote(e.target.value)}
+            rows={2}
+            placeholder={confirmAction === 'verify' ? 'Optional note (e.g. verified via cancelled cheque)' : 'Reason for failure (e.g. name mismatch, invalid IFSC)'}
+            className="input-field text-xs resize-none"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={submitManualDecision}
+              disabled={submitting}
+              className={`flex-1 flex items-center justify-center gap-2 text-white font-semibold text-xs py-2 rounded-lg disabled:opacity-40 ${confirmAction === 'verify' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+            >
+              {submitting ? <FiLoader2 className="w-3.5 h-3.5 animate-spin" /> : <FiCheck className="w-3.5 h-3.5" />}
+              Confirm {confirmAction === 'verify' ? 'Verified' : 'Failed'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmAction(null)}
+              disabled={submitting}
+              className="px-4 text-xs font-semibold text-gray-500 hover:text-gray-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => openConfirm('verify')}
+            disabled={!hasBankDetails}
+            className="flex-1 flex items-center justify-center gap-2 bg-green-600 text-white font-semibold text-sm py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-green-700 transition-colors"
+          >
+            <FiShieldCheck className="w-4 h-4" /> Mark as Verified
+          </button>
+          <button
+            type="button"
+            onClick={() => openConfirm('fail')}
+            disabled={!hasBankDetails}
+            className="flex-1 flex items-center justify-center gap-2 bg-white border border-red-200 text-red-600 font-semibold text-sm py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-50 transition-colors"
+          >
+            <FiShieldAlert className="w-4 h-4" /> Mark as Failed
+          </button>
+        </div>
+      )}
       <p className="text-[11px] text-gray-400 leading-relaxed">
-        Razorpay sends ₹1 to this account to confirm it's active and to fetch the bank's registered account-holder
-        name. This is a one-way verification transfer used by Razorpay to validate the account — it cannot be reversed,
-        and nothing is debited from the restaurant.
+        Manual verification: cross-check the account number, IFSC and holder name against a cancelled cheque, bank
+        passbook, or a successful payout before marking verified. Every decision is recorded in the audit log with
+        your admin account and timestamp.
       </p>
     </div>
   );
