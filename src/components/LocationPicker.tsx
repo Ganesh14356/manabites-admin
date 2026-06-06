@@ -17,6 +17,8 @@ interface LocationResult {
   address: string;
   lat: number;
   lng: number;
+  placeId?: string;     // Google Place ID — undefined for map-clicks/drags/Nominatim matches
+  locationName?: string; // short label e.g. "Nakkala Gutta, Hanamkonda"
 }
 
 interface LocationPickerProps {
@@ -124,6 +126,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   const [open, setOpen] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -229,7 +232,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
 
     if (item.source === 'nominatim') {
       setQuery(item.fullText);
-      onChange({ address: item.fullText, lat: item.lat!, lng: item.lng! });
+      onChange({ address: item.fullText, lat: item.lat!, lng: item.lng!, locationName: item.mainText });
       return;
     }
 
@@ -244,11 +247,47 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
         address: r.formatted_address || item.fullText,
         lat: loc.lat(),
         lng: loc.lng(),
+        placeId: item.placeId,
+        locationName: item.mainText,
       };
       setQuery(result.address);
       onChange(result);
     });
   }, [onChange]);
+
+  // Reverse-geocode a manually-pinned point (map click / marker drag) into an
+  // address. A custom pin is no longer "the" Google place, so placeId is cleared.
+  const reverseGeocode = useCallback(async (rLat: number, rLng: number): Promise<LocationResult> => {
+    const fallback: LocationResult = { address: `${rLat.toFixed(5)}, ${rLng.toFixed(5)}`, lat: rLat, lng: rLng };
+
+    if (mapsReady && geocoderRef.current) {
+      const fromGoogle = await new Promise<LocationResult | null>((resolve) => {
+        geocoderRef.current.geocode({ location: { lat: rLat, lng: rLng } }, (results: any[] | null, status: string) => {
+          if (status !== 'OK' || !results?.[0]) { resolve(null); return; }
+          const r = results[0];
+          resolve({ address: r.formatted_address || fallback.address, lat: rLat, lng: rLng });
+        });
+      });
+      if (fromGoogle) return fromGoogle;
+    }
+
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${rLat}&lon=${rLng}&format=json`,
+        { headers: { 'Accept-Language': 'en' } }
+      );
+      const data = await res.json();
+      if (data?.display_name) return { address: data.display_name, lat: rLat, lng: rLng };
+    } catch { /* keep fallback */ }
+
+    return fallback;
+  }, [mapsReady]);
+
+  const handlePinMove = useCallback(async (newLat: number, newLng: number) => {
+    const result = await reverseGeocode(newLat, newLng);
+    setQuery(result.address);
+    onChange(result);
+  }, [reverseGeocode, onChange]);
 
   // Pasted Google-style addresses often include shop names, "near X / opposite Y"
   // landmarks and house numbers that OpenStreetMap's Nominatim database doesn't
@@ -261,11 +300,12 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   // exact place", not "let me browse suggestions".
   const fetchSuggestions = useCallback(async (q: string, autoSelect = false) => {
     const trimmed = q.trim();
-    if (trimmed.length < 3) { setSuggestions([]); setOpen(false); return; }
+    if (trimmed.length < 3) { setSuggestions([]); setOpen(false); setNotFound(false); return; }
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
+    setNotFound(false);
     try {
       // Google Places understands shop names, landmarks & typos directly — try it first.
       let results: Suggestion[] = [];
@@ -288,9 +328,10 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
         return;
       }
       setSuggestions(results);
-      setOpen(results.length > 0);
+      setOpen(true);
+      setNotFound(results.length === 0);
     } catch (e: any) {
-      if (e.name !== 'AbortError') { setSuggestions([]); setOpen(false); }
+      if (e.name !== 'AbortError') { setSuggestions([]); setOpen(true); setNotFound(true); }
     } finally {
       setLoading(false);
     }
@@ -304,14 +345,21 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     const autoSelect = pastedRef.current;
     pastedRef.current = false;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(val, autoSelect), autoSelect ? 50 : 400);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val, autoSelect), autoSelect ? 50 : 300);
   };
 
   const handlePaste = () => { pastedRef.current = true; };
 
+  // Map click / marker drag both move the pin to a custom point — reverse-geocode
+  // it so the address field stays in sync with where the marker actually sits.
   const handleMapClick = useCallback((clickLat: number, clickLng: number) => {
-    onChange({ address: query || `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`, lat: clickLat, lng: clickLng });
-  }, [onChange, query]);
+    handlePinMove(clickLat, clickLng);
+  }, [handlePinMove]);
+
+  const handleMarkerDragEnd = useCallback((e: any) => {
+    const { lat: newLat, lng: newLng } = e.target.getLatLng();
+    handlePinMove(newLat, newLng);
+  }, [handlePinMove]);
 
   const handleDetectLocation = () => {
     if (!navigator.geolocation) return;
@@ -376,7 +424,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
         {query && (
           <button
             type="button"
-            onMouseDown={e => { e.preventDefault(); setQuery(''); setSuggestions([]); setOpen(false); }}
+            onMouseDown={e => { e.preventDefault(); setQuery(''); setSuggestions([]); setOpen(false); setNotFound(false); }}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
           >
             <X className="w-4 h-4" />
@@ -385,12 +433,12 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
       </div>
 
       {/* Suggestions dropdown — portaled to body so it escapes the scrollable drawer's clipping */}
-      {open && suggestions.length > 0 && dropdownRect && createPortal(
+      {open && dropdownRect && createPortal(
         <ul
           className="fixed bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto"
           style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width, zIndex: 99999 }}
         >
-          {suggestions.map(item => (
+          {suggestions.length > 0 ? suggestions.map(item => (
             <li
               key={item.id}
               onMouseDown={e => { e.preventDefault(); handleSelect(item); }}
@@ -402,7 +450,9 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
                 {item.secondaryText && <p className="text-xs text-gray-400 truncate">{item.secondaryText}</p>}
               </div>
             </li>
-          ))}
+          )) : notFound && (
+            <li className="px-4 py-3 text-sm text-gray-400 text-center">Location not found</li>
+          )}
         </ul>,
         document.body
       )}
@@ -434,14 +484,20 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
           />
           <MapClickHandler onMapClick={handleMapClick} />
           <RecenterMap center={mapCenter} />
-          {markerPos && <Marker position={markerPos} />}
+          {markerPos && (
+            <Marker
+              position={markerPos}
+              draggable
+              eventHandlers={{ dragend: handleMarkerDragEnd }}
+            />
+          )}
         </MapContainer>
       </div>
 
       {hasCoords ? (
         <div className="flex items-center gap-1.5 text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
           <Check className="w-3.5 h-3.5 flex-shrink-0" />
-          <span>Pinned: {lat!.toFixed(5)}, {lng!.toFixed(5)} — click map to repin</span>
+          <span>Pinned: {lat!.toFixed(5)}, {lng!.toFixed(5)} — click map or drag the marker to adjust</span>
         </div>
       ) : (
         <p className="text-xs text-orange-600">Search for a location or click on the map to pin coordinates.</p>

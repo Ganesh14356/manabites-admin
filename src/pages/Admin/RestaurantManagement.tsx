@@ -311,7 +311,7 @@ function AddRestaurantModal({
   const [loading, setLoading] = useState(false);
   const [showIdentityError, setShowIdentityError] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; address: string; placeId?: string; locationName?: string } | null>(null);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<AddFormData>({
     resolver: zodResolver(addRestaurantSchema),
@@ -319,6 +319,11 @@ function AddRestaurantModal({
   const watchedAddress = watch('address', '');
 
   const onSubmit = async (data: AddFormData) => {
+    if (!locationCoords?.lat || !locationCoords?.lng) {
+      toast.error('Pin the restaurant location on the map before saving — search for it or click/drag the marker.');
+      return;
+    }
+
     setLoading(true);
     setShowIdentityError(false);
     setErrorMessage(null);
@@ -336,8 +341,10 @@ function AddRestaurantModal({
         email: data.email,
         phone: data.phone,
         address: data.address,
-        lat: locationCoords?.lat ?? null,
-        lng: locationCoords?.lng ?? null,
+        lat: locationCoords.lat,
+        lng: locationCoords.lng,
+        placeId: locationCoords.placeId ?? null,
+        locationName: locationCoords.locationName ?? null,
         fssai: data.fssai || '',
         bankAccount: data.bankAccount || '',
         openingHours: data.openingHours || '',
@@ -457,10 +464,13 @@ function AddRestaurantModal({
                   lng={locationCoords?.lng ?? null}
                   address={watchedAddress}
                   onChange={(result) => {
-                    setLocationCoords({ lat: result.lat, lng: result.lng, address: result.address });
+                    setLocationCoords({ lat: result.lat, lng: result.lng, address: result.address, placeId: result.placeId, locationName: result.locationName });
                     setValue('address', result.address);
                   }}
                 />
+                {!locationCoords?.lat && (
+                  <p className="text-xs text-orange-600 mt-1">Search and select the exact location, or click/drag the marker on the map — required to save.</p>
+                )}
               </div>
 
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
@@ -473,7 +483,7 @@ function AddRestaurantModal({
 
               <motion.button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !locationCoords?.lat || !locationCoords?.lng}
                 whileTap={{ scale: 0.97 }}
                 className="btn-primary disabled:opacity-60 w-full"
               >
@@ -754,7 +764,7 @@ function EditRestaurantModal({
 }) {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; placeId?: string; locationName?: string } | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EditFormData>({
@@ -792,7 +802,7 @@ function EditRestaurantModal({
       });
       setLocationCoords(
         restaurant.lat && restaurant.lng
-          ? { lat: restaurant.lat, lng: restaurant.lng }
+          ? { lat: restaurant.lat, lng: restaurant.lng, placeId: (restaurant as any).placeId ?? undefined, locationName: (restaurant as any).locationName ?? undefined }
           : null
       );
     }
@@ -800,6 +810,12 @@ function EditRestaurantModal({
 
   const onSubmit = async (data: EditFormData) => {
     if (!restaurant) return;
+
+    if (!locationCoords?.lat || !locationCoords?.lng) {
+      toast.error('Pin the restaurant location on the map before saving — search for it or click/drag the marker.');
+      return;
+    }
+
     setLoading(true);
     setErrorMessage(null);
 
@@ -809,8 +825,10 @@ function EditRestaurantModal({
         phone: data.phone,
         address: data.address,
         email: data.email,
-        lat: locationCoords?.lat ?? null,
-        lng: locationCoords?.lng ?? null,
+        lat: locationCoords.lat,
+        lng: locationCoords.lng,
+        placeId: locationCoords.placeId ?? null,
+        locationName: locationCoords.locationName ?? null,
         fssai:              data.fssai              || '',
         bankAccount:        data.bankAccount        || '',
         accountHolderName:  data.accountHolderName  || '',
@@ -942,10 +960,13 @@ function EditRestaurantModal({
                   lng={locationCoords?.lng ?? null}
                   address={watchedAddress}
                   onChange={(result) => {
-                    setLocationCoords({ lat: result.lat, lng: result.lng });
+                    setLocationCoords({ lat: result.lat, lng: result.lng, placeId: result.placeId, locationName: result.locationName });
                     setValue('address', result.address);
                   }}
                 />
+                {!locationCoords?.lat && (
+                  <p className="text-xs text-orange-600 mt-1">Search and select the exact location, or click/drag the marker on the map — required to save.</p>
+                )}
               </div>
 
               <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3">
@@ -957,7 +978,7 @@ function EditRestaurantModal({
 
               <motion.button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !locationCoords?.lat || !locationCoords?.lng}
                 whileTap={{ scale: 0.97 }}
                 className="btn-primary disabled:opacity-60 w-full"
               >
