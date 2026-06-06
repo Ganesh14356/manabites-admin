@@ -160,7 +160,12 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     return new Promise((resolve) => {
       if (!autocompleteRef.current) { resolve([]); return; }
       autocompleteRef.current.getPlacePredictions(
-        { input: q, componentRestrictions: { country: 'in' }, types: ['geocode', 'establishment'] },
+        // NOTE: 'geocode' and 'establishment' are mutually-exclusive type
+        // collections — passing both makes Google return INVALID_REQUEST and
+        // the search silently falls through to Nominatim every time. Omitting
+        // `types` returns a mix of addresses + places (shop names), which is
+        // what an address picker needs.
+        { input: q, componentRestrictions: { country: 'in' } },
         (preds: any[] | null, status: string) => {
           if (status !== 'OK' || !preds?.length) { resolve([]); return; }
           resolve(preds.map((p): Suggestion => ({
