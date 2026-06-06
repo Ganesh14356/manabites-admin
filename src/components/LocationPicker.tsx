@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -60,6 +61,8 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputWrapRef = useRef<HTMLDivElement>(null);
+  const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const hasCoords = lat != null && lng != null && lat !== 0 && lng !== 0;
   const markerPos: [number, number] | null = hasCoords ? [lat!, lng!] : null;
@@ -69,6 +72,24 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     setQuery(address || '');
   }, [address]);
 
+  const updateDropdownRect = useCallback(() => {
+    const el = inputWrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updateDropdownRect();
+    window.addEventListener('scroll', updateDropdownRect, true);
+    window.addEventListener('resize', updateDropdownRect);
+    return () => {
+      window.removeEventListener('scroll', updateDropdownRect, true);
+      window.removeEventListener('resize', updateDropdownRect);
+    };
+  }, [open, updateDropdownRect]);
+
   const fetchSuggestions = useCallback(async (q: string) => {
     if (q.trim().length < 3) { setSuggestions([]); setOpen(false); return; }
     abortRef.current?.abort();
@@ -76,8 +97,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        q, format: 'json', limit: '5', countrycodes: 'in',
-        viewbox: '78.28,17.27,78.65,17.60', bounded: '0',
+        q, format: 'json', limit: '6', countrycodes: 'in', dedupe: '1', addressdetails: '1',
       });
       const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
         signal: abortRef.current.signal,
@@ -162,7 +182,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   return (
     <div ref={containerRef} className="space-y-2">
       {/* Search input */}
-      <div className="relative">
+      <div className="relative" ref={inputWrapRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
           {loading ? <Loader className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
         </div>
@@ -170,6 +190,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
           type="text"
           value={query}
           onChange={handleInputChange}
+          onFocus={() => { if (suggestions.length > 0) { updateDropdownRect(); setOpen(true); } }}
           placeholder="Search restaurant location (e.g. Banjara Hills, Hyderabad)"
           className="input-field pl-9 pr-9"
           autoComplete="off"
@@ -183,29 +204,33 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
             <X className="w-4 h-4" />
           </button>
         )}
-
-        {/* Suggestions dropdown */}
-        {open && suggestions.length > 0 && (
-          <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto mt-1">
-            {suggestions.map(item => {
-              const parts = item.display_name.split(', ');
-              return (
-                <li
-                  key={item.place_id}
-                  onMouseDown={e => { e.preventDefault(); handleSelect(item); }}
-                  className="flex items-start gap-2.5 px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm border-b last:border-b-0 border-gray-50"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-brand flex-shrink-0 mt-0.5" />
-                  <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{parts.slice(0, 2).join(', ')}</p>
-                    <p className="text-xs text-gray-400 truncate">{parts.slice(2).join(', ')}</p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </div>
+
+      {/* Suggestions dropdown — portaled to body so it escapes the scrollable drawer's clipping */}
+      {open && suggestions.length > 0 && dropdownRect && createPortal(
+        <ul
+          className="fixed bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto"
+          style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width, zIndex: 99999 }}
+        >
+          {suggestions.map(item => {
+            const parts = item.display_name.split(', ');
+            return (
+              <li
+                key={item.place_id}
+                onMouseDown={e => { e.preventDefault(); handleSelect(item); }}
+                className="flex items-start gap-2.5 px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm border-b last:border-b-0 border-gray-50"
+              >
+                <MapPin className="w-3.5 h-3.5 text-brand flex-shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{parts.slice(0, 2).join(', ')}</p>
+                  <p className="text-xs text-gray-400 truncate">{parts.slice(2).join(', ')}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ul>,
+        document.body
+      )}
 
       {/* Detect current location */}
       <button
