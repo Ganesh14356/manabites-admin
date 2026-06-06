@@ -561,7 +561,7 @@ function BankVerificationSection({
             verifiedName: accountHolderName.trim(),
             verifiedAt: serverTimestamp() as unknown as Timestamp,
             lastAttemptAt: serverTimestamp() as unknown as Timestamp,
-            errorMessage: confirmNote.trim() || undefined,
+            ...(confirmNote.trim() ? { errorMessage: confirmNote.trim() } : {}),
           }
         : {
             status: 'failed',
@@ -569,25 +569,37 @@ function BankVerificationSection({
             lastAttemptAt: serverTimestamp() as unknown as Timestamp,
           };
 
-      await updateDoc(restRef, { bankVerification: newVerification });
+      try {
+        await updateDoc(restRef, { bankVerification: newVerification });
+      } catch (err: any) {
+        console.error('[bankVerification] restaurant doc update failed:', err?.code, err?.message);
+        toast.error(`Could not save status on restaurant — ${err?.code ?? err?.message ?? 'unknown error'}`);
+        return;
+      }
 
-      await addDoc(collection(db, 'bankVerificationLogs'), {
-        restaurantId: restaurant.id,
-        restaurantName: restaurant.name,
-        maskedAccountNumber: maskAccountNumber(bankAccount.trim()),
-        ifsc: ifscCode.trim().toUpperCase(),
-        accountHolderName: accountHolderName.trim(),
-        status: newVerification.status,
-        method: 'manual',
-        note: confirmNote.trim() || null,
-        performedBy: user?.uid ?? null,
-        performedByEmail: user?.email ?? null,
-        createdAt: serverTimestamp(),
-      });
+      try {
+        await addDoc(collection(db, 'bankVerificationLogs'), {
+          restaurantId: restaurant.id,
+          restaurantName: restaurant.name,
+          maskedAccountNumber: maskAccountNumber(bankAccount.trim()),
+          ifsc: ifscCode.trim().toUpperCase(),
+          accountHolderName: accountHolderName.trim(),
+          status: newVerification.status,
+          method: 'manual',
+          note: confirmNote.trim() || null,
+          performedBy: user?.uid ?? null,
+          performedByEmail: user?.email ?? null,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err: any) {
+        console.error('[bankVerification] audit log create failed:', err?.code, err?.message);
+        toast(`Status saved, but audit log failed — ${err?.code ?? err?.message ?? 'unknown error'}`, { icon: '⚠️' });
+      }
 
       toast.success(isVerified ? 'Marked as verified' : 'Marked as failed');
       setConfirmAction(null);
     } catch (err: any) {
+      console.error('[bankVerification] unexpected error:', err);
       toast.error(err?.message || 'Could not save verification status');
     } finally {
       setSubmitting(false);
