@@ -90,20 +90,38 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     };
   }, [open, updateDropdownRect]);
 
+  const runSearch = useCallback(async (q: string, signal: AbortSignal): Promise<NominatimResult[]> => {
+    const params = new URLSearchParams({
+      q, format: 'json', limit: '6', countrycodes: 'in', dedupe: '1', addressdetails: '1',
+    });
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      signal,
+      headers: { 'Accept-Language': 'en' },
+    });
+    return res.json();
+  }, []);
+
+  // Pasted Google-style addresses often include shop names, "near X / opposite Y"
+  // landmarks and house numbers that OpenStreetMap's Nominatim database doesn't
+  // recognise as a single string. If the full query returns nothing, progressively
+  // drop the leading comma-separated segments (the most specific/landmark parts)
+  // and retry — this usually lands on a matching area/locality/city.
   const fetchSuggestions = useCallback(async (q: string) => {
-    if (q.trim().length < 3) { setSuggestions([]); setOpen(false); return; }
+    const trimmed = q.trim();
+    if (trimmed.length < 3) { setSuggestions([]); setOpen(false); return; }
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        q, format: 'json', limit: '6', countrycodes: 'in', dedupe: '1', addressdetails: '1',
-      });
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
-        signal: abortRef.current.signal,
-        headers: { 'Accept-Language': 'en' },
-      });
-      const data: NominatimResult[] = await res.json();
+      const segments = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      const candidates = [trimmed, ...segments.map((_, i) => segments.slice(i + 1).join(', ')).filter(s => s.length >= 3)];
+
+      let data: NominatimResult[] = [];
+      for (const candidate of candidates) {
+        data = await runSearch(candidate, controller.signal);
+        if (data.length > 0) break;
+      }
       setSuggestions(data);
       setOpen(data.length > 0);
     } catch (e: any) {
@@ -111,7 +129,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [runSearch]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
