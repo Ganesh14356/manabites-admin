@@ -33,6 +33,56 @@ interface NominatimResult {
   lon: string;
 }
 
+// Unified suggestion shape — backed by either Google Places (typo-tolerant,
+// understands shop names/landmarks) or Nominatim/OpenStreetMap (free fallback).
+interface Suggestion {
+  id: string;
+  mainText: string;
+  secondaryText: string;
+  source: 'google' | 'nominatim';
+  placeId?: string;          // google
+  lat?: number; lng?: number; // nominatim (resolved immediately)
+  fullText: string;           // nominatim (used as display_name on select)
+}
+
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+
+// ── Load Google Maps Places library once (script tag, shared across instances) ──
+let mapsScriptState: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
+const mapsReadyCallbacks: Array<() => void> = [];
+
+function loadGoogleMaps(): Promise<void> {
+  if (mapsScriptState === 'ready') return Promise.resolve();
+  if (mapsScriptState === 'failed') return Promise.reject(new Error('Google Maps unavailable'));
+
+  return new Promise((resolve, reject) => {
+    mapsReadyCallbacks.push(resolve);
+    if (mapsScriptState === 'loading') return;
+    mapsScriptState = 'loading';
+
+    if (!MAPS_KEY) { mapsScriptState = 'failed'; mapsReadyCallbacks.forEach(cb => cb()); reject(new Error('No API key')); return; }
+
+    const w = window as any;
+    if (w.google?.maps?.places) {
+      mapsScriptState = 'ready';
+      mapsReadyCallbacks.forEach(cb => cb());
+      return;
+    }
+
+    w.__lp_gm_init = () => {
+      mapsScriptState = 'ready';
+      mapsReadyCallbacks.forEach(cb => cb());
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&callback=__lp_gm_init`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => { mapsScriptState = 'failed'; reject(new Error('Failed to load Google Maps')); };
+    document.head.appendChild(script);
+  });
+}
+
 const DEFAULT_CENTER: [number, number] = [17.4483, 78.3915]; // Hyderabad
 
 function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
@@ -54,14 +104,17 @@ function RecenterMap({ center }: { center: [number, number] }) {
 
 export function LocationPicker({ lat, lng, address, onChange }: LocationPickerProps) {
   const [query, setQuery] = useState(address || '');
-  const [suggestions, setSuggestions] = useState<NominatimResult[]>([]);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [mapsReady, setMapsReady] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputWrapRef = useRef<HTMLDivElement>(null);
+  const autocompleteRef = useRef<any>(null);
+  const geocoderRef = useRef<any>(null);
   const [dropdownRect, setDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const hasCoords = lat != null && lng != null && lat !== 0 && lng !== 0;
@@ -71,6 +124,19 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
   useEffect(() => {
     setQuery(address || '');
   }, [address]);
+
+  // Load Google Places (typo-tolerant, knows shop names/landmarks) once.
+  // Falls back silently to Nominatim if the key is missing or the script fails.
+  useEffect(() => {
+    loadGoogleMaps()
+      .then(() => {
+        const w = window as any;
+        autocompleteRef.current = new w.google.maps.places.AutocompleteService();
+        geocoderRef.current = new w.google.maps.Geocoder();
+        setMapsReady(true);
+      })
+      .catch(() => { /* stay on Nominatim */ });
+  }, []);
 
   const updateDropdownRect = useCallback(() => {
     const el = inputWrapRef.current;
@@ -90,7 +156,27 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     };
   }, [open, updateDropdownRect]);
 
-  const runSearch = useCallback(async (q: string, signal: AbortSignal): Promise<NominatimResult[]> => {
+  const googleSearch = useCallback((q: string): Promise<Suggestion[]> => {
+    return new Promise((resolve) => {
+      if (!autocompleteRef.current) { resolve([]); return; }
+      autocompleteRef.current.getPlacePredictions(
+        { input: q, componentRestrictions: { country: 'in' }, types: ['geocode', 'establishment'] },
+        (preds: any[] | null, status: string) => {
+          if (status !== 'OK' || !preds?.length) { resolve([]); return; }
+          resolve(preds.map((p): Suggestion => ({
+            id: `g_${p.place_id}`,
+            mainText: p.structured_formatting?.main_text || p.description,
+            secondaryText: p.structured_formatting?.secondary_text || '',
+            fullText: p.description,
+            source: 'google',
+            placeId: p.place_id,
+          })));
+        },
+      );
+    });
+  }, []);
+
+  const nominatimSearch = useCallback(async (q: string, signal: AbortSignal): Promise<Suggestion[]> => {
     const params = new URLSearchParams({
       q, format: 'json', limit: '6', countrycodes: 'in', dedupe: '1', addressdetails: '1',
     });
@@ -98,7 +184,19 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
       signal,
       headers: { 'Accept-Language': 'en' },
     });
-    return res.json();
+    const data: NominatimResult[] = await res.json();
+    return data.map((r): Suggestion => {
+      const parts = r.display_name.split(', ');
+      return {
+        id: `n_${r.place_id}`,
+        mainText: parts.slice(0, 2).join(', '),
+        secondaryText: parts.slice(2).join(', '),
+        fullText: r.display_name,
+        source: 'nominatim',
+        lat: parseFloat(r.lat),
+        lng: parseFloat(r.lon),
+      };
+    });
   }, []);
 
   // Pasted Google-style addresses often include shop names, "near X / opposite Y"
@@ -114,12 +212,23 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     abortRef.current = controller;
     setLoading(true);
     try {
+      // Google Places understands shop names, landmarks & typos directly — try it first.
+      if (mapsReady && autocompleteRef.current) {
+        const googleResults = await googleSearch(trimmed);
+        if (googleResults.length > 0) {
+          setSuggestions(googleResults);
+          setOpen(true);
+          return;
+        }
+      }
+
+      // Fall back to Nominatim with progressive query simplification.
       const segments = trimmed.split(',').map(s => s.trim()).filter(Boolean);
       const candidates = [trimmed, ...segments.map((_, i) => segments.slice(i + 1).join(', ')).filter(s => s.length >= 3)];
 
-      let data: NominatimResult[] = [];
+      let data: Suggestion[] = [];
       for (const candidate of candidates) {
-        data = await runSearch(candidate, controller.signal);
+        data = await nominatimSearch(candidate, controller.signal);
         if (data.length > 0) break;
       }
       setSuggestions(data);
@@ -129,7 +238,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     } finally {
       setLoading(false);
     }
-  }, [runSearch]);
+  }, [mapsReady, googleSearch, nominatimSearch]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -138,16 +247,31 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     debounceRef.current = setTimeout(() => fetchSuggestions(val), 400);
   };
 
-  const handleSelect = (item: NominatimResult) => {
-    const result: LocationResult = {
-      address: item.display_name,
-      lat: parseFloat(item.lat),
-      lng: parseFloat(item.lon),
-    };
-    setQuery(item.display_name);
+  const handleSelect = async (item: Suggestion) => {
     setSuggestions([]);
     setOpen(false);
-    onChange(result);
+
+    if (item.source === 'nominatim') {
+      setQuery(item.fullText);
+      onChange({ address: item.fullText, lat: item.lat!, lng: item.lng! });
+      return;
+    }
+
+    // Google prediction — resolve place_id → lat/lng/formatted address via Geocoder.
+    setQuery(item.fullText);
+    if (!geocoderRef.current) return;
+    geocoderRef.current.geocode({ placeId: item.placeId }, (results: any[] | null, status: string) => {
+      if (status !== 'OK' || !results?.[0]) return;
+      const r = results[0];
+      const loc = r.geometry.location;
+      const result: LocationResult = {
+        address: r.formatted_address || item.fullText,
+        lat: loc.lat(),
+        lng: loc.lng(),
+      };
+      setQuery(result.address);
+      onChange(result);
+    });
   };
 
   const handleMapClick = useCallback((clickLat: number, clickLng: number) => {
@@ -230,22 +354,19 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
           className="fixed bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-56 overflow-y-auto"
           style={{ top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width, zIndex: 99999 }}
         >
-          {suggestions.map(item => {
-            const parts = item.display_name.split(', ');
-            return (
-              <li
-                key={item.place_id}
-                onMouseDown={e => { e.preventDefault(); handleSelect(item); }}
-                className="flex items-start gap-2.5 px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm border-b last:border-b-0 border-gray-50"
-              >
-                <MapPin className="w-3.5 h-3.5 text-brand flex-shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                  <p className="font-medium text-gray-900 truncate">{parts.slice(0, 2).join(', ')}</p>
-                  <p className="text-xs text-gray-400 truncate">{parts.slice(2).join(', ')}</p>
-                </div>
-              </li>
-            );
-          })}
+          {suggestions.map(item => (
+            <li
+              key={item.id}
+              onMouseDown={e => { e.preventDefault(); handleSelect(item); }}
+              className="flex items-start gap-2.5 px-4 py-3 cursor-pointer hover:bg-gray-50 text-sm border-b last:border-b-0 border-gray-50"
+            >
+              <MapPin className="w-3.5 h-3.5 text-brand flex-shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <p className="font-medium text-gray-900 truncate">{item.mainText}</p>
+                {item.secondaryText && <p className="text-xs text-gray-400 truncate">{item.secondaryText}</p>}
+              </div>
+            </li>
+          ))}
         </ul>,
         document.body
       )}
