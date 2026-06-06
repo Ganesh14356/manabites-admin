@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { useForm } from 'react-hook-form';
@@ -18,6 +18,7 @@ import {
 import { auth, db, secondaryAuth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { LocationPicker } from '../../components/LocationPicker';
+import { razorpay, maskAccountNumber } from '../../services/razorpay';
 import {
   Plus as FiPlus,
   Edit2 as FiEdit2,
@@ -34,6 +35,8 @@ import {
   EyeOff as FiEyeOff,
   RefreshCw as FiRefreshCw,
   IndianRupee, Banknote, CreditCard, Clock, CheckCircle2,
+  ShieldCheck as FiShieldCheck, ShieldAlert as FiShieldAlert,
+  ShieldQuestion as FiShieldQuestion, Loader2 as FiLoader2,
 } from 'lucide-react';
 
 // ── TYPES ─────────────────────────────────────────────────────────
@@ -488,6 +491,217 @@ function AddRestaurantModal({
   );
 }
 
+// ── BANK ACCOUNT VERIFICATION (Razorpay Fund Account Validation) ─────
+
+interface BankVerification {
+  status: 'not_verified' | 'verifying' | 'verified' | 'failed';
+  referenceId?: string;
+  verifiedName?: string;
+  bankName?: string;
+  verifiedAt?: Timestamp | null;
+  lastAttemptAt?: Timestamp | null;
+  errorMessage?: string;
+}
+
+function VerificationStatusBadge({ status }: { status: BankVerification['status'] }) {
+  const map: Record<BankVerification['status'], { label: string; cls: string; icon: ReactNode }> = {
+    not_verified: { label: 'Not Verified', cls: 'bg-gray-100 text-gray-500', icon: <FiShieldQuestion className="w-3.5 h-3.5" /> },
+    verifying:    { label: 'Verifying…',   cls: 'bg-blue-50 text-blue-600',  icon: <FiLoader2 className="w-3.5 h-3.5 animate-spin" /> },
+    verified:     { label: 'Verified',     cls: 'bg-green-50 text-green-700', icon: <FiShieldCheck className="w-3.5 h-3.5" /> },
+    failed:       { label: 'Failed',       cls: 'bg-red-50 text-red-600',    icon: <FiShieldAlert className="w-3.5 h-3.5" /> },
+  };
+  const m = map[status] ?? map.not_verified;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${m.cls}`}>
+      {m.icon} {m.label}
+    </span>
+  );
+}
+
+function BankVerificationSection({
+  restaurant,
+  register,
+  watch,
+  errors,
+}: {
+  restaurant: RestaurantDoc | null;
+  register: ReturnType<typeof useForm<EditFormData>>['register'];
+  watch: ReturnType<typeof useForm<EditFormData>>['watch'];
+  errors: ReturnType<typeof useForm<EditFormData>>['formState']['errors'];
+}) {
+  const { user } = useAuth();
+  const [verifying, setVerifying] = useState(false);
+  const [showFullAccount, setShowFullAccount] = useState(false);
+
+  const bankAccount = watch('bankAccount', '');
+  const accountHolderName = watch('accountHolderName', '');
+  const ifscCode = watch('ifscCode', '');
+
+  const verification: BankVerification = (restaurant as any)?.bankVerification ?? { status: 'not_verified' };
+  const canVerify = !!(bankAccount?.trim() && accountHolderName?.trim() && ifscCode?.trim()) && !verifying;
+
+  const handleVerify = async () => {
+    if (!restaurant) return;
+    setVerifying(true);
+    const restRef = doc(db, 'restaurants', restaurant.id);
+    try {
+      await updateDoc(restRef, {
+        bankVerification: { status: 'verifying', lastAttemptAt: serverTimestamp() },
+      });
+
+      const result = await razorpay.verifyBankAccount({
+        accountNumber: bankAccount.trim(),
+        ifsc: ifscCode.trim().toUpperCase(),
+        accountHolderName: accountHolderName.trim(),
+        restaurantId: restaurant.id,
+      });
+      const v = result.validation;
+      const isVerified = v.status === 'completed' && v.results?.account_status === 'active';
+
+      const newVerification: BankVerification = isVerified
+        ? {
+            status: 'verified',
+            referenceId: v.id,
+            verifiedName: v.results?.registered_name || accountHolderName.trim(),
+            bankName: result.fundAccount?.bank_account?.bank_name || '',
+            verifiedAt: serverTimestamp() as unknown as Timestamp,
+            lastAttemptAt: serverTimestamp() as unknown as Timestamp,
+          }
+        : {
+            status: 'failed',
+            referenceId: v.id,
+            errorMessage:
+              v.status === 'failed'
+                ? 'Bank declined verification — the account may be invalid, closed or inactive.'
+                : `Verification returned an unexpected status: ${v.status}`,
+            lastAttemptAt: serverTimestamp() as unknown as Timestamp,
+          };
+
+      await updateDoc(restRef, { bankVerification: newVerification });
+
+      await addDoc(collection(db, 'bankVerificationLogs'), {
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+        maskedAccountNumber: maskAccountNumber(bankAccount.trim()),
+        ifsc: ifscCode.trim().toUpperCase(),
+        accountHolderName: accountHolderName.trim(),
+        status: newVerification.status,
+        referenceId: v.id,
+        razorpayResult: {
+          account_status: v.results?.account_status ?? null,
+          registered_name: v.results?.registered_name ?? null,
+        },
+        performedBy: user?.uid ?? null,
+        performedByEmail: user?.email ?? null,
+        createdAt: serverTimestamp(),
+      });
+
+      if (isVerified) toast.success(`Bank account verified — ${newVerification.verifiedName}`);
+      else toast.error(newVerification.errorMessage || 'Bank verification failed');
+    } catch (err: any) {
+      const message = err?.message || 'Bank verification request failed';
+      await updateDoc(restRef, {
+        bankVerification: { status: 'failed', errorMessage: message, lastAttemptAt: serverTimestamp() },
+      }).catch(() => {});
+      toast.error(message);
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-gray-600 uppercase tracking-wide flex items-center gap-1.5">
+          <Banknote className="w-4 h-4" /> Bank Account Details
+        </p>
+        <VerificationStatusBadge status={verification.status} />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+          Bank Account Number
+        </label>
+        <div className="relative">
+          <input
+            {...register('bankAccount')}
+            type={showFullAccount ? 'text' : 'password'}
+            placeholder="Account Number"
+            autoComplete="off"
+            className={`input-field pr-10 ${errors.bankAccount ? 'border-red-400' : ''}`}
+          />
+          <button
+            type="button"
+            onClick={() => setShowFullAccount(s => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            title={showFullAccount ? 'Hide account number' : 'Show full account number (admin only)'}
+          >
+            {showFullAccount ? <FiEyeOff className="w-4 h-4" /> : <FiEye className="w-4 h-4" />}
+          </button>
+        </div>
+        {!showFullAccount && bankAccount && (
+          <p className="text-xs text-gray-400 mt-1">Masked: {maskAccountNumber(bankAccount)}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+          Account Holder Name
+        </label>
+        <input
+          {...register('accountHolderName')}
+          type="text"
+          placeholder="As per bank records"
+          className={`input-field ${errors.accountHolderName ? 'border-red-400' : ''}`}
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+          IFSC Code
+        </label>
+        <input
+          {...register('ifscCode')}
+          type="text"
+          placeholder="e.g. SBIN0001234"
+          className={`input-field uppercase ${errors.ifscCode ? 'border-red-400' : ''}`}
+        />
+      </div>
+
+      {verification.status === 'verified' && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800 space-y-1">
+          <p className="flex items-center gap-1.5 font-semibold"><FiCheck className="w-3.5 h-3.5" /> Verified — account eligible for payouts</p>
+          {verification.verifiedName && <p>Verified Name: <span className="font-medium">{verification.verifiedName}</span></p>}
+          {verification.bankName && <p>Bank: {verification.bankName}</p>}
+          <p>Verified On: {formatDate(verification.verifiedAt)}</p>
+          {verification.referenceId && <p className="text-green-600/70">Ref: {verification.referenceId}</p>}
+        </div>
+      )}
+      {verification.status === 'failed' && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700">
+          {verification.errorMessage || 'Verification failed. Please re-check the account details and try again.'}
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleVerify}
+        disabled={!canVerify}
+        className="w-full flex items-center justify-center gap-2 bg-brand text-white font-semibold text-sm py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand/90 transition-colors"
+      >
+        {verifying
+          ? <><FiLoader2 className="w-4 h-4 animate-spin" /> Verifying via Razorpay…</>
+          : <><FiShieldCheck className="w-4 h-4" /> Verify Account (₹1 penny-drop)</>}
+      </button>
+      <p className="text-[11px] text-gray-400 leading-relaxed">
+        Razorpay sends ₹1 to this account to confirm it's active and to fetch the bank's registered account-holder
+        name. This is a one-way verification transfer used by Razorpay to validate the account — it cannot be reversed,
+        and nothing is debited from the restaurant.
+      </p>
+    </div>
+  );
+}
+
 function EditRestaurantModal({
   isOpen,
   restaurant,
@@ -618,10 +832,34 @@ function EditRestaurantModal({
                 { name: 'email', label: 'Owner Email *', placeholder: 'owner@restaurant.com', type: 'email' },
                 { name: 'phone', label: 'Phone Number *', placeholder: '9876543210', type: 'tel' },
                 { name: 'fssai', label: 'FSSAI License (Optional)', placeholder: '12345678901234', type: 'text' },
-                { name: 'bankAccount',       label: 'Bank Account Number',    placeholder: 'Account Number',      type: 'text' },
-                { name: 'accountHolderName', label: 'Account Holder Name',     placeholder: 'As per bank records', type: 'text' },
-                { name: 'ifscCode',          label: 'IFSC Code',                placeholder: 'e.g. SBIN0001234',    type: 'text' },
-                { name: 'openingHours',      label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
+              ].map(field => (
+                <div key={field.name}>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    {field.label}
+                  </label>
+                  <input
+                    {...register(field.name as keyof EditFormData)}
+                    type={field.type}
+                    placeholder={field.placeholder}
+                    className={`input-field ${errors[field.name as keyof EditFormData] ? 'border-red-400' : ''}`}
+                  />
+                  {errors[field.name as keyof EditFormData] && (
+                    <p className="text-red-500 text-xs mt-1">
+                      {errors[field.name as keyof EditFormData]?.message}
+                    </p>
+                  )}
+                </div>
+              ))}
+
+              <BankVerificationSection
+                restaurant={restaurant}
+                register={register}
+                watch={watch}
+                errors={errors}
+              />
+
+              {[
+                { name: 'openingHours', label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
               ].map(field => (
                 <div key={field.name}>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">

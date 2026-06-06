@@ -95,6 +95,20 @@ export interface RazorpayCollection<T> {
   items: T[];
 }
 
+export interface FundAccountValidationResult {
+  contact: { id: string; name: string };
+  fundAccount: { id: string; bank_account?: { name: string; ifsc: string; bank_name?: string } };
+  validation: {
+    id: string;
+    fund_account_id: string;
+    amount: number;
+    currency: string;
+    status: 'created' | 'completed' | 'failed';
+    results?: { account_status: 'active' | 'inactive'; registered_name: string };
+    notes?: Record<string, string>;
+  };
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export const razorpay = {
@@ -115,7 +129,20 @@ export const razorpay = {
 
   listSettlements: (opts?: { count?: number; skip?: number }) =>
     call<{ items: unknown[]; count: number }>('list_settlements', opts),
+
+  /** Penny-drop bank account verification: contact → fund account → validation. */
+  verifyBankAccount: (params: { accountNumber: string; ifsc: string; accountHolderName: string; restaurantId?: string }) =>
+    call<FundAccountValidationResult>('verify_bank_account', params),
+
+  getFundAccountValidation: (validationId: string) =>
+    call<FundAccountValidationResult['validation']>('get_fund_account_validation', { validationId }),
 };
+
+/** Mask all but the last 4 digits: "1234567896633" → "XXXXXXXXX6633" */
+export function maskAccountNumber(accountNumber: string): string {
+  if (!accountNumber || accountNumber.length <= 4) return accountNumber;
+  return 'X'.repeat(accountNumber.length - 4) + accountNumber.slice(-4);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -84,6 +84,64 @@ export default async function handler(req, res) {
       fetchBody = JSON.stringify(params.payout);
       break;
 
+    // ── Bank account verification (Fund Account Validation / penny-drop) ──
+    // Flow: create contact → create fund account → create validation.
+    // Razorpay sends a small amount (default ₹1) FROM the platform's RazorpayX
+    // account TO the bank account to confirm it is real & active, and returns
+    // the bank's registered account-holder name. There is no "reversal" —
+    // the amount is the verification cost, it is not debited from the vendor.
+    case 'verify_bank_account': {
+      const { accountNumber, ifsc, accountHolderName, restaurantId } = params;
+      if (!accountNumber || !ifsc || !accountHolderName) {
+        return res.status(400).json({ error: 'accountNumber, ifsc and accountHolderName are required' });
+      }
+
+      try {
+        const contactRes = await fetch(`${BASE}/contacts`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            name: accountHolderName,
+            type: 'vendor',
+            reference_id: restaurantId || undefined,
+          }),
+        });
+        const contact = await contactRes.json();
+        if (!contactRes.ok) return res.status(contactRes.status).json({ error: contact.error ?? contact, step: 'create_contact' });
+
+        const fundAccountRes = await fetch(`${BASE}/fund_accounts`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            contact_id: contact.id,
+            account_type: 'bank_account',
+            bank_account: { name: accountHolderName, ifsc, account_number: accountNumber },
+          }),
+        });
+        const fundAccount = await fundAccountRes.json();
+        if (!fundAccountRes.ok) return res.status(fundAccountRes.status).json({ error: fundAccount.error ?? fundAccount, step: 'create_fund_account' });
+
+        const validationRes = await fetch(`${BASE}/fund_accounts/validations`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            fund_account: { id: fundAccount.id },
+            amount: 100, // ₹1 in paise — Razorpay's minimum penny-drop amount
+            currency: 'INR',
+            notes: restaurantId ? { restaurantId } : undefined,
+          }),
+        });
+        const validation = await validationRes.json();
+        if (!validationRes.ok) return res.status(validationRes.status).json({ error: validation.error ?? validation, step: 'create_validation' });
+
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.status(200).json({ contact, fundAccount, validation });
+      } catch (err) {
+        return res.status(502).json({ error: String(err) });
+      }
+    }
+
+    case 'get_fund_account_validation':
+      url = `${BASE}/fund_accounts/validations/${params.validationId}`;
+      break;
+
     case 'list_settlements': {
       const qs = new URLSearchParams({
         count: String(params.count ?? 50),
