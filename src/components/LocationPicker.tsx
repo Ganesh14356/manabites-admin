@@ -60,7 +60,10 @@ function loadGoogleMaps(): Promise<void> {
     if (mapsScriptState === 'loading') return;
     mapsScriptState = 'loading';
 
-    if (!MAPS_KEY) { mapsScriptState = 'failed'; mapsReadyCallbacks.forEach(cb => cb()); reject(new Error('No API key')); return; }
+    if (!MAPS_KEY) {
+      console.warn('[LocationPicker] VITE_GOOGLE_MAPS_API_KEY missing — using Nominatim only.');
+      mapsScriptState = 'failed'; mapsReadyCallbacks.forEach(cb => cb()); reject(new Error('No API key')); return;
+    }
 
     const w = window as any;
     if (w.google?.maps?.places) {
@@ -68,6 +71,15 @@ function loadGoogleMaps(): Promise<void> {
       mapsReadyCallbacks.forEach(cb => cb());
       return;
     }
+
+    // Google calls this global when the key/referrer/billing is invalid
+    // (RefererNotAllowedMapError, InvalidKeyMapError, ApiNotActivatedMapError, etc).
+    // Surfacing it makes an otherwise-silent fallback-to-Nominatim debuggable.
+    w.gm_authFailure = () => {
+      console.error('[LocationPicker] Google Maps auth failure — likely the API key is not allowed for this domain (' + window.location.hostname + ') or Places API/billing is not enabled. Falling back to Nominatim.');
+      mapsScriptState = 'failed';
+      mapsReadyCallbacks.forEach(cb => cb());
+    };
 
     w.__lp_gm_init = () => {
       mapsScriptState = 'ready';
@@ -78,7 +90,10 @@ function loadGoogleMaps(): Promise<void> {
     script.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&callback=__lp_gm_init`;
     script.async = true;
     script.defer = true;
-    script.onerror = () => { mapsScriptState = 'failed'; reject(new Error('Failed to load Google Maps')); };
+    script.onerror = () => {
+      console.error('[LocationPicker] Failed to load the Google Maps script (network/CSP). Falling back to Nominatim.');
+      mapsScriptState = 'failed'; reject(new Error('Failed to load Google Maps'));
+    };
     document.head.appendChild(script);
   });
 }
@@ -167,7 +182,11 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
         // what an address picker needs.
         { input: q, componentRestrictions: { country: 'in' } },
         (preds: any[] | null, status: string) => {
-          if (status !== 'OK' || !preds?.length) { resolve([]); return; }
+          if (status !== 'OK' || !preds?.length) {
+            if (status !== 'ZERO_RESULTS') console.warn('[LocationPicker] Google Places Autocomplete status:', status, '— falling back to Nominatim for query:', q);
+            resolve([]);
+            return;
+          }
           resolve(preds.map((p): Suggestion => ({
             id: `g_${p.place_id}`,
             mainText: p.structured_formatting?.main_text || p.description,
@@ -204,55 +223,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
     });
   }, []);
 
-  // Pasted Google-style addresses often include shop names, "near X / opposite Y"
-  // landmarks and house numbers that OpenStreetMap's Nominatim database doesn't
-  // recognise as a single string. If the full query returns nothing, progressively
-  // drop the leading comma-separated segments (the most specific/landmark parts)
-  // and retry — this usually lands on a matching area/locality/city.
-  const fetchSuggestions = useCallback(async (q: string) => {
-    const trimmed = q.trim();
-    if (trimmed.length < 3) { setSuggestions([]); setOpen(false); return; }
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setLoading(true);
-    try {
-      // Google Places understands shop names, landmarks & typos directly — try it first.
-      if (mapsReady && autocompleteRef.current) {
-        const googleResults = await googleSearch(trimmed);
-        if (googleResults.length > 0) {
-          setSuggestions(googleResults);
-          setOpen(true);
-          return;
-        }
-      }
-
-      // Fall back to Nominatim with progressive query simplification.
-      const segments = trimmed.split(',').map(s => s.trim()).filter(Boolean);
-      const candidates = [trimmed, ...segments.map((_, i) => segments.slice(i + 1).join(', ')).filter(s => s.length >= 3)];
-
-      let data: Suggestion[] = [];
-      for (const candidate of candidates) {
-        data = await nominatimSearch(candidate, controller.signal);
-        if (data.length > 0) break;
-      }
-      setSuggestions(data);
-      setOpen(data.length > 0);
-    } catch (e: any) {
-      if (e.name !== 'AbortError') { setSuggestions([]); setOpen(false); }
-    } finally {
-      setLoading(false);
-    }
-  }, [mapsReady, googleSearch, nominatimSearch]);
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setQuery(val);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchSuggestions(val), 400);
-  };
-
-  const handleSelect = async (item: Suggestion) => {
+  const handleSelect = useCallback((item: Suggestion) => {
     setSuggestions([]);
     setOpen(false);
 
@@ -277,7 +248,66 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
       setQuery(result.address);
       onChange(result);
     });
+  }, [onChange]);
+
+  // Pasted Google-style addresses often include shop names, "near X / opposite Y"
+  // landmarks and house numbers that OpenStreetMap's Nominatim database doesn't
+  // recognise as a single string. If the full query returns nothing, progressively
+  // drop the leading comma-separated segments (the most specific/landmark parts)
+  // and retry — this usually lands on a matching area/locality/city.
+  //
+  // `autoSelect` (set when the text was pasted, not typed) skips the dropdown and
+  // pins the top match straight away — pasting a full address means "find this
+  // exact place", not "let me browse suggestions".
+  const fetchSuggestions = useCallback(async (q: string, autoSelect = false) => {
+    const trimmed = q.trim();
+    if (trimmed.length < 3) { setSuggestions([]); setOpen(false); return; }
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    try {
+      // Google Places understands shop names, landmarks & typos directly — try it first.
+      let results: Suggestion[] = [];
+      if (mapsReady && autocompleteRef.current) {
+        results = await googleSearch(trimmed);
+      }
+
+      // Fall back to Nominatim with progressive query simplification.
+      if (results.length === 0) {
+        const segments = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+        const candidates = [trimmed, ...segments.map((_, i) => segments.slice(i + 1).join(', ')).filter(s => s.length >= 3)];
+        for (const candidate of candidates) {
+          results = await nominatimSearch(candidate, controller.signal);
+          if (results.length > 0) break;
+        }
+      }
+
+      if (autoSelect && results.length > 0) {
+        handleSelect(results[0]);
+        return;
+      }
+      setSuggestions(results);
+      setOpen(results.length > 0);
+    } catch (e: any) {
+      if (e.name !== 'AbortError') { setSuggestions([]); setOpen(false); }
+    } finally {
+      setLoading(false);
+    }
+  }, [mapsReady, googleSearch, nominatimSearch, handleSelect]);
+
+  const pastedRef = useRef(false);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setQuery(val);
+    const autoSelect = pastedRef.current;
+    pastedRef.current = false;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchSuggestions(val, autoSelect), autoSelect ? 50 : 400);
   };
+
+  const handlePaste = () => { pastedRef.current = true; };
 
   const handleMapClick = useCallback((clickLat: number, clickLng: number) => {
     onChange({ address: query || `${clickLat.toFixed(5)}, ${clickLng.toFixed(5)}`, lat: clickLat, lng: clickLng });
@@ -338,6 +368,7 @@ export function LocationPicker({ lat, lng, address, onChange }: LocationPickerPr
           value={query}
           onChange={handleInputChange}
           onFocus={() => { if (suggestions.length > 0) { updateDropdownRect(); setOpen(true); } }}
+          onPaste={handlePaste}
           placeholder="Search restaurant location (e.g. Banjara Hills, Hyderabad)"
           className="input-field pl-9 pr-9"
           autoComplete="off"
