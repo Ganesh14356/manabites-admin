@@ -91,10 +91,11 @@ export default async function handler(req, res) {
     // the bank's registered account-holder name. There is no "reversal" —
     // the amount is the verification cost, it is not debited from the vendor.
     case 'verify_bank_account': {
-      const { accountNumber, ifsc, accountHolderName, restaurantId } = params;
+      const { accountNumber, ifsc, accountHolderName, restaurantId, riderId } = params;
       if (!accountNumber || !ifsc || !accountHolderName) {
         return res.status(400).json({ error: 'accountNumber, ifsc and accountHolderName are required' });
       }
+      const referenceId = restaurantId || riderId || undefined;
 
       try {
         const contactRes = await fetch(`${BASE}/contacts`, {
@@ -102,7 +103,7 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             name: accountHolderName,
             type: 'vendor',
-            reference_id: restaurantId || undefined,
+            reference_id: referenceId,
           }),
         });
         const contact = await contactRes.json();
@@ -125,7 +126,7 @@ export default async function handler(req, res) {
             fund_account: { id: fundAccount.id },
             amount: 100, // ₹1 in paise — Razorpay's minimum penny-drop amount
             currency: 'INR',
-            notes: restaurantId ? { restaurantId } : undefined,
+            notes: referenceId ? { ...(restaurantId ? { restaurantId } : {}), ...(riderId ? { riderId } : {}) } : undefined,
           }),
         });
         const validation = await validationRes.json();

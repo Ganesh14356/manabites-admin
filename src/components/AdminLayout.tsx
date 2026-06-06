@@ -5,7 +5,7 @@ import {
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
-  Headphones, Receipt, Gavel, ClipboardList,
+  Headphones, Receipt, Gavel, ClipboardList, Radar,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -24,6 +24,7 @@ const BASE_NAV = [
   { name: 'Riders',               path: '/admin/riders',               icon: Bike       },
   { name: 'Rider Approvals',      path: '/admin/rider-approvals',      icon: ShieldCheck },
   { name: 'Live Map',             path: '/admin/live-map',             icon: MapPin      },
+  { name: 'Live Riders Map',      path: '/admin/rider-map',            icon: Radar       },
   { name: 'Rider Performance',    path: '/admin/rider-performance',    icon: TrendingUp  },
   { name: 'Geofencing',           path: '/admin/geofencing',           icon: Target      },
   { name: 'Notifications',        path: '/admin/notifications',        icon: Bell        },

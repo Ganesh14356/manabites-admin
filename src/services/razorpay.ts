@@ -131,7 +131,7 @@ export const razorpay = {
     call<{ items: unknown[]; count: number }>('list_settlements', opts),
 
   /** Penny-drop bank account verification: contact → fund account → validation. */
-  verifyBankAccount: (params: { accountNumber: string; ifsc: string; accountHolderName: string; restaurantId?: string }) =>
+  verifyBankAccount: (params: { accountNumber: string; ifsc: string; accountHolderName: string; restaurantId?: string; riderId?: string }) =>
     call<FundAccountValidationResult>('verify_bank_account', params),
 
   getFundAccountValidation: (validationId: string) =>

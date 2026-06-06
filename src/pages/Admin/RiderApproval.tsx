@@ -4,9 +4,11 @@ import toast from 'react-hot-toast';
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
   collection, query, where, onSnapshot, doc, getDocs,
-  updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
+  updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, runTransaction,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
+import { logAuditEvent } from '../../services/auditLog';
 import {
   Search, CheckCircle, XCircle, Eye, EyeOff, Calendar, Phone, MapPin, X, AlertTriangle,
   ChevronLeft, ChevronRight, Bike, ShieldCheck, ShieldX, User, ExternalLink,
@@ -75,6 +77,25 @@ const STEP_LABELS = ['Personal', 'Vehicle', 'Documents', 'Bank'];
 const PAGE_SIZE = 10;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * MBR<YY><MM><seq> — e.g. MBR26060001, MBR26060002. The 4-digit sequence is a
+ * globally auto-incrementing counter (atomic Firestore transaction), prefixed
+ * with the approval month so IDs stay both sequential and time-readable.
+ */
+async function generateRiderId(): Promise<string> {
+  const counterRef = doc(db, 'counters', 'riderId');
+  const seq = await runTransaction(db, async (txn) => {
+    const snap = await txn.get(counterRef);
+    const next = (snap.exists() ? (snap.data().seq ?? 0) : 0) + 1;
+    txn.set(counterRef, { seq: next, updatedAt: serverTimestamp() }, { merge: true });
+    return next;
+  });
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  return `MBR${yy}${mm}${String(seq).padStart(4, '0')}`;
+}
 
 function generatePassword(length = 12): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
@@ -256,6 +277,8 @@ function StageStepper({ status }: { status: ApprovalStatus }) {
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function RiderApproval() {
+  const { user, profile } = useAuth();
+  const adminName = profile?.name || user?.email || 'Admin';
   const [riders, setRiders]             = useState<RiderDoc[]>([]);
   const [loading, setLoading]           = useState(true);
   const [searchQuery, setSearchQuery]   = useState('');
@@ -464,9 +487,11 @@ export default function RiderApproval() {
   const handleApprove = async (r: RiderDoc) => {
     setApprovingId(r.id);
     try {
+      const riderID = await generateRiderId();
       await updateDoc(doc(db, collectionFor(r), r.id), {
         approved: true, approvalStatus: 'approved', status: 'approved',
         isActive: true, approvedAt: serverTimestamp(), rejectedReason: null,
+        riderID, approvedBy: adminName, approvedByUid: user?.uid ?? null,
       });
       if (r.phone) {
         const ph = String(r.phone).replace(/^\+91/, '').trim();
@@ -478,9 +503,15 @@ export default function RiderApproval() {
           isOnline: false, activeOrderId: null,
           totalDeliveries: 0, totalEarnings: 0, todayEarnings: 0, weeklyEarnings: 0,
           approvedAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          riderID, approvedBy: adminName, approvedByUid: user?.uid ?? null,
         }, { merge: true });
       }
-      toast.success(`${r.name} approved! They can now receive deliveries.`, { duration: 4000 });
+      await logAuditEvent({
+        action: 'RIDER_APPROVED', entityType: 'rider', entityId: r.id, entityName: r.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { riderID, phone: r.phone ?? null },
+      });
+      toast.success(`${r.name} approved! Rider ID: ${riderID}`, { duration: 4500 });
     } catch (err: any) {
       toast.error('Approval failed: ' + err.message);
     } finally {
@@ -505,6 +536,11 @@ export default function RiderApproval() {
           rejectedReason: rejectReason.trim(), rejectedAt: serverTimestamp(), updatedAt: serverTimestamp(),
         }, { merge: true });
       }
+      await logAuditEvent({
+        action: 'RIDER_REJECTED', entityType: 'rider', entityId: rejectTarget.id, entityName: rejectTarget.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { reason: rejectReason.trim(), phone: rejectTarget.phone ?? null },
+      });
       toast.error(`${rejectTarget.name} has been rejected.`, { duration: 4000 });
       setRejectTarget(null);
       setRejectReason('');
@@ -523,11 +559,11 @@ export default function RiderApproval() {
     setCreatingAccountId(r.id);
     try {
       const password = generatePassword(12);
-      const { user } = await createUserWithEmailAndPassword(secondaryAuth, r.email, password);
+      const { user: authUser } = await createUserWithEmailAndPassword(secondaryAuth, r.email, password);
       await signOut(secondaryAuth);
 
-      await setDoc(doc(db, 'users', user.uid), {
-        uid: user.uid, email: r.email, name: r.name, phone: r.phone || '',
+      await setDoc(doc(db, 'users', authUser.uid), {
+        uid: authUser.uid, email: r.email, name: r.name, phone: r.phone || '',
         role: 'rider', isActive: true,
         vehicleType: r.vehicleType ?? '', vehicleNumber: r.vehicleNumber ?? '',
         licenseNumber: r.licenseNumber ?? '', aadharNumber: r.aadharNumber ?? '',
@@ -541,10 +577,15 @@ export default function RiderApproval() {
       const ph = String(r.phone || '').replace(/^\+91/, '').trim();
       if (ph) {
         await setDoc(doc(db, 'riders', ph), {
-          authUid: user.uid, loginCreated: true, updatedAt: serverTimestamp(),
+          authUid: authUser.uid, loginCreated: true, loginCreatedAt: serverTimestamp(), updatedAt: serverTimestamp(),
         }, { merge: true });
       }
 
+      await logAuditEvent({
+        action: 'RIDER_LOGIN_CREATED', entityType: 'rider', entityId: r.id, entityName: r.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { email: r.email, authUid: authUser.uid },
+      });
       setCreatedCreds({ email: r.email, password, name: r.name });
       setShowPass(false);
       setShowCredModal(true);
@@ -596,6 +637,11 @@ export default function RiderApproval() {
       if (ph) await deleteDoc(doc(db, 'riders', ph));
       if (deleteTarget.authUid) await deleteDoc(doc(db, 'users', deleteTarget.authUid));
       else if (collectionFor(deleteTarget) === 'users') await deleteDoc(doc(db, 'users', deleteTarget.id));
+      await logAuditEvent({
+        action: 'RIDER_DELETED', entityType: 'rider', entityId: deleteTarget.id, entityName: deleteTarget.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { phone: deleteTarget.phone ?? null, source: 'approvals' },
+      });
       toast.success(`${deleteTarget.name} deleted`);
       setDeleteTarget(null);
       if (detailTarget?.id === deleteTarget.id) setDetailTarget(null);

@@ -19,6 +19,7 @@ import RazorpayPayments from './pages/Admin/RazorpayPayments';
 import RiderManagement from './pages/Admin/RiderManagement';
 import RiderApproval from './pages/Admin/RiderApproval';
 import LiveOrdersMap from './pages/Admin/LiveOrdersMap';
+import LiveRidersMap from './pages/Admin/LiveRidersMap';
 import RiderPerformance from './pages/Admin/RiderPerformance';
 import Geofencing from './pages/Admin/Geofencing';
 import NotificationsBroadcast from './pages/Admin/NotificationsBroadcast';
@@ -87,6 +88,7 @@ export default function App() {
                 <Route path="riders" element={<RiderManagement />} />
                 <Route path="rider-approvals" element={<RiderApproval />} />
                 <Route path="live-map" element={<LiveOrdersMap />} />
+                <Route path="rider-map" element={<LiveRidersMap />} />
                 <Route path="rider-performance" element={<RiderPerformance />} />
                 <Route path="geofencing" element={<Geofencing />} />
                 <Route path="notifications" element={<NotificationsBroadcast />} />

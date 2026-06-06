@@ -14,12 +14,17 @@ import {
   onSnapshot, orderBy, getDocs, Timestamp, serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
+import { logAuditEvent } from '../../services/auditLog';
+import { razorpay, maskAccountNumber } from '../../services/razorpay';
 import {
   Plus, Edit2, Key, ToggleLeft, ToggleRight, Search, Copy, Trash2,
   AlertTriangle, X, Check, Eye, EyeOff, Bike,
   Map as MapIcon, List, DollarSign, FileCheck, FileX, ShoppingBag,
   TrendingUp, ChevronDown, ExternalLink, FileText,
+  Lock, ShieldCheck, ShieldAlert, ShieldQuestion, Loader2, Banknote,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -43,6 +48,18 @@ const VEHICLE_ICONS: Record<string, string> = {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface RiderBankVerification {
+  status: 'not_verified' | 'verifying' | 'verified' | 'failed';
+  verificationId?: string;
+  fundAccountId?: string;
+  verifiedName?: string;
+  accountStatus?: string;
+  verifiedAt?: Timestamp | null;
+  verifiedBy?: string;
+  lastAttemptAt?: Timestamp | null;
+  errorMessage?: string | null;
+}
+
 interface RiderDoc {
   uid: string;
   name: string;
@@ -50,6 +67,7 @@ interface RiderDoc {
   phone: string;
   role: 'rider';
   isActive: boolean;
+  riderID?: string;
   vehicleType?: string;
   vehicleNumber?: string;
   licenseDocUrl?: string;
@@ -58,9 +76,11 @@ interface RiderDoc {
   aadharDocUrl?: string;
   aadharApproved?: boolean;
   bankAccountNumber?: string;
+  bankAccountHolderName?: string;
   bankIFSC?: string;
   bankDocUrl?: string;
   bankApproved?: boolean;
+  bankVerification?: RiderBankVerification;
   createdAt: Timestamp;
   _fromRidersCollection?: boolean;
 }
@@ -130,6 +150,7 @@ const riderSchema = z.object({
   vehicleNumber: z.string().min(4).max(20),
   licenseNumber: z.string().optional(),
   bankAccountNumber: z.string().optional(),
+  bankAccountHolderName: z.string().optional(),
   bankIFSC: z.string().optional(),
 });
 type RiderFormData = z.infer<typeof riderSchema>;
@@ -235,6 +256,198 @@ function DocPreviewModal({ rider, onClose, onApprove }: {
   );
 }
 
+// ── Bank Verification (Razorpay Fund Account Validation / ₹1 penny-drop) ─────
+
+function RiderVerificationBadge({ status }: { status: RiderBankVerification['status'] }) {
+  const map: Record<RiderBankVerification['status'], { label: string; cls: string; icon: ReactNode }> = {
+    not_verified: { label: '⚪ Not Verified', cls: 'bg-gray-100 text-gray-500', icon: <ShieldQuestion className="w-3.5 h-3.5" /> },
+    verifying:    { label: '🟡 Pending',      cls: 'bg-yellow-50 text-yellow-700', icon: <Loader2 className="w-3.5 h-3.5 animate-spin" /> },
+    verified:     { label: '🟢 Verified',     cls: 'bg-green-50 text-green-700', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+    failed:       { label: '🔴 Failed',       cls: 'bg-red-50 text-red-600', icon: <ShieldAlert className="w-3.5 h-3.5" /> },
+  };
+  const m = map[status] ?? map.not_verified;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${m.cls}`}>
+      {m.icon} {m.label}
+    </span>
+  );
+}
+
+function RiderBankVerificationSection({
+  rider,
+  register,
+  watch,
+  errors,
+}: {
+  rider: RiderDoc | null;
+  register: ReturnType<typeof useForm<RiderFormData>>['register'];
+  watch: ReturnType<typeof useForm<RiderFormData>>['watch'];
+  errors: ReturnType<typeof useForm<RiderFormData>>['formState']['errors'];
+}) {
+  const { user, profile } = useAuth();
+  const adminName = profile?.name || user?.email || 'Admin';
+  const [verifying, setVerifying] = useState(false);
+  const [showFullAccount, setShowFullAccount] = useState(false);
+
+  const bankAccountNumber = watch('bankAccountNumber', '') || '';
+  const bankAccountHolderName = watch('bankAccountHolderName', '') || '';
+  const bankIFSC = watch('bankIFSC', '') || '';
+
+  const verification: RiderBankVerification = rider?.bankVerification ?? { status: 'not_verified' };
+  const isLocked = verification.status === 'verified';
+  const hasBankDetails = !!(bankAccountNumber.trim() && bankAccountHolderName.trim() && bankIFSC.trim());
+
+  const handleVerify = async () => {
+    if (!rider) return;
+    setVerifying(true);
+    try {
+      const result = await razorpay.verifyBankAccount({
+        accountNumber: bankAccountNumber.trim(),
+        ifsc: bankIFSC.trim().toUpperCase(),
+        accountHolderName: bankAccountHolderName.trim(),
+        riderId: rider.uid,
+      });
+
+      const v = result.validation;
+      const registeredName = v.results?.registered_name ?? '';
+      const accountStatus = v.results?.account_status ?? '';
+      const nameMatches = !!registeredName &&
+        registeredName.trim().toLowerCase() === bankAccountHolderName.trim().toLowerCase();
+      const isVerified = v.status === 'completed' && accountStatus === 'active' && nameMatches;
+
+      const newVerification: RiderBankVerification = isVerified
+        ? {
+            status: 'verified',
+            verificationId: v.id,
+            fundAccountId: result.fundAccount.id,
+            verifiedName: registeredName,
+            accountStatus,
+            verifiedAt: serverTimestamp() as unknown as Timestamp,
+            verifiedBy: adminName,
+            lastAttemptAt: serverTimestamp() as unknown as Timestamp,
+            errorMessage: null,
+          }
+        : {
+            status: 'failed',
+            verificationId: v.id,
+            fundAccountId: result.fundAccount.id,
+            verifiedName: registeredName || undefined,
+            accountStatus: accountStatus || undefined,
+            lastAttemptAt: serverTimestamp() as unknown as Timestamp,
+            errorMessage: !nameMatches && registeredName
+              ? `Name mismatch — bank records show "${registeredName}"`
+              : v.status !== 'completed'
+                ? `Validation did not complete (status: ${v.status})`
+                : 'Account is not active.',
+          };
+
+      const ref = rider._fromRidersCollection ? doc(db, 'riders', rider.uid) : doc(db, 'users', rider.uid);
+      await updateDoc(ref, {
+        bankVerification: newVerification,
+        bankAccountHolderName: bankAccountHolderName.trim(),
+      });
+
+      await logAuditEvent({
+        action: isVerified ? 'RIDER_BANK_VERIFIED' : 'RIDER_BANK_VERIFICATION_FAILED',
+        entityType: 'rider', entityId: rider.uid, entityName: rider.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: {
+          verificationId: v.id,
+          maskedAccountNumber: maskAccountNumber(bankAccountNumber.trim()),
+          registeredName, accountStatus,
+        },
+      });
+
+      if (isVerified) toast.success('Bank account verified ✓');
+      else toast.error(`Verification failed — ${newVerification.errorMessage}`);
+    } catch (err: any) {
+      toast.error('Verification request failed: ' + (err?.message || 'unknown error'));
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 p-4 bg-gray-50 border border-gray-200 rounded-xl">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-bold text-gray-600 uppercase tracking-wide flex items-center gap-1.5">
+          <Banknote className="w-4 h-4" /> Bank Details {isLocked && <Lock className="w-3 h-3 text-gray-400" />}
+        </p>
+        <RiderVerificationBadge status={verification.status} />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Account Number</label>
+        <div className="relative">
+          <input
+            {...register('bankAccountNumber')}
+            type={showFullAccount ? 'text' : 'password'}
+            disabled={isLocked}
+            autoComplete="off"
+            placeholder="Account number"
+            className={`input-field pr-10 ${errors.bankAccountNumber ? 'border-red-400' : ''} ${isLocked ? 'bg-gray-100 text-gray-500' : ''}`}
+          />
+          <button type="button" onClick={() => setShowFullAccount(s => !s)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+            {showFullAccount ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+        {!showFullAccount && bankAccountNumber && (
+          <p className="text-xs text-gray-400 mt-1">Masked: {maskAccountNumber(bankAccountNumber)}</p>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Account Holder Name</label>
+        <input {...register('bankAccountHolderName')} disabled={isLocked}
+          placeholder="As per bank records"
+          className={`input-field ${errors.bankAccountHolderName ? 'border-red-400' : ''} ${isLocked ? 'bg-gray-100 text-gray-500' : ''}`} />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">IFSC Code</label>
+        <input {...register('bankIFSC')} disabled={isLocked}
+          placeholder="e.g. SBIN0001234"
+          className={`input-field uppercase ${errors.bankIFSC ? 'border-red-400' : ''} ${isLocked ? 'bg-gray-100 text-gray-500' : ''}`} />
+      </div>
+
+      {verification.status === 'verified' && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-xs text-green-800 space-y-1">
+          <p className="flex items-center gap-1.5 font-semibold"><ShieldCheck className="w-3.5 h-3.5" /> Verified — eligible for payouts</p>
+          {verification.verifiedName && <p>Registered Name: <span className="font-medium">{verification.verifiedName}</span></p>}
+          <p>Verification ID: <span className="font-mono">{verification.verificationId}</span></p>
+          <p>Verified by {verification.verifiedBy || 'Admin'} on {formatDate(verification.verifiedAt)}</p>
+        </div>
+      )}
+      {verification.status === 'failed' && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 space-y-1">
+          <p className="font-semibold">🔴 Verification failed</p>
+          <p>{verification.errorMessage || 'Could not verify this bank account.'}</p>
+          <p className="text-red-700/70">You can correct the details and try again.</p>
+        </div>
+      )}
+
+      {!isLocked && (
+        <button
+          type="button"
+          onClick={handleVerify}
+          disabled={!hasBankDetails || verifying}
+          className="w-full flex items-center justify-center gap-2 bg-brand text-white font-semibold text-sm py-2.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-dark transition-colors"
+        >
+          {verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+          {verifying ? 'Verifying via Razorpay…' : 'Verify Account'}
+        </button>
+      )}
+      <p className="text-[11px] text-gray-400 leading-relaxed">
+        Sends ₹1 to the account through Razorpay Fund Account Validation, reads the bank's
+        registered account-holder name, and matches it against the name entered above. This ₹1
+        is the cost of verification — Razorpay does not reverse it. Once verified, these fields
+        are locked and the verification ID, timestamp and admin name are stored permanently.
+      </p>
+    </div>
+  );
+}
+
 // ── Quick Action Dropdown ─────────────────────────────────────────────────────
 
 function QuickActionMenu({ rider, onEarnings, onResetPass, onToggle, onDelete }: {
@@ -310,6 +523,8 @@ function QuickActionMenu({ rider, onEarnings, onResetPass, onToggle, onDelete }:
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function RiderManagement() {
+  const { user, profile } = useAuth();
+  const adminName = profile?.name || user?.email || 'Admin';
   const [tab, setTab] = useState<Tab>('list');
   const [riders, setRiders] = useState<RiderDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -343,7 +558,7 @@ export default function RiderManagement() {
   const [earnFrom, setEarnFrom] = useState('');
   const [earnTo, setEarnTo]     = useState('');
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<RiderFormData>({
+  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<RiderFormData>({
     resolver: zodResolver(riderSchema),
     defaultValues: { vehicleType: 'Bike' },
   });
@@ -480,8 +695,14 @@ export default function RiderManagement() {
           vehicleType: data.vehicleType, vehicleNumber: data.vehicleNumber,
           licenseNumber: data.licenseNumber || null,
           bankAccountNumber: data.bankAccountNumber || null,
+          bankAccountHolderName: data.bankAccountHolderName || null,
           bankIFSC: data.bankIFSC || null,
           updatedAt: serverTimestamp(),
+        });
+        await logAuditEvent({
+          action: 'RIDER_EDITED', entityType: 'rider', entityId: editTarget.uid, entityName: data.name,
+          adminUid: user?.uid, adminName, adminEmail: user?.email,
+          details: { phone: data.phone, vehicleNumber: data.vehicleNumber },
         });
         toast.success('Rider updated');
         closeModal();
@@ -496,9 +717,15 @@ export default function RiderManagement() {
           vehicleType: data.vehicleType, vehicleNumber: data.vehicleNumber,
           licenseNumber: data.licenseNumber || null,
           bankAccountNumber: data.bankAccountNumber || null,
+          bankAccountHolderName: data.bankAccountHolderName || null,
           bankIFSC: data.bankIFSC || null,
           licenseApproved: false, bankApproved: false,
           createdAt: serverTimestamp(),
+        });
+        await logAuditEvent({
+          action: 'RIDER_CREATED', entityType: 'rider', entityId: uid, entityName: data.name,
+          adminUid: user?.uid, adminName, adminEmail: user?.email,
+          details: { email: data.email, phone: data.phone, source: 'rider_management' },
         });
         await setDoc(doc(db, 'riders', data.phone), {
           name: data.name, phone: data.phone, email: data.email,
@@ -523,8 +750,15 @@ export default function RiderManagement() {
       const ref = rider._fromRidersCollection
         ? doc(db, 'riders', rider.uid)
         : doc(db, 'users', rider.uid);
-      await updateDoc(ref, { isActive: !rider.isActive });
-      toast.success(`Rider ${!rider.isActive ? 'activated' : 'suspended'}`);
+      const activating = !rider.isActive;
+      await updateDoc(ref, { isActive: activating });
+      await logAuditEvent({
+        action: activating ? 'RIDER_ACTIVATED' : 'RIDER_SUSPENDED',
+        entityType: 'rider', entityId: rider.uid, entityName: rider.name,
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { phone: rider.phone ?? null },
+      });
+      toast.success(`Rider ${activating ? 'activated' : 'suspended'}`);
     } catch { toast.error('Failed to update status'); }
   };
 
@@ -560,6 +794,11 @@ export default function RiderManagement() {
         const ph = String(deleteTarget.phone || '').replace(/^\+91/, '').trim();
         if (ph) { try { await deleteDoc(doc(db, 'riders', ph)); } catch { /* ignore */ } }
       }
+      await logAuditEvent({
+        action: 'RIDER_DELETED', entityType: 'rider', entityId: deleteTarget.uid, entityName: deleteTarget.name || 'Rider',
+        adminUid: user?.uid, adminName, adminEmail: user?.email,
+        details: { phone: deleteTarget.phone ?? null, source: 'rider_management' },
+      });
       toast.success(`${deleteTarget.name || 'Rider'} deleted`);
       setDeleteTarget(null);
     } catch (err: any) {
@@ -575,6 +814,7 @@ export default function RiderManagement() {
       vehicleNumber: r.vehicleNumber ?? '',
       licenseNumber: (r as any).licenseNumber ?? '',
       bankAccountNumber: r.bankAccountNumber ?? '',
+      bankAccountHolderName: r.bankAccountHolderName ?? '',
       bankIFSC: r.bankIFSC ?? '',
     });
     setShowAddModal(true);
@@ -1090,22 +1330,14 @@ export default function RiderManagement() {
                 </section>
                 <section>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Documents (Optional)</p>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">DL Number</label>
-                      <input {...register('licenseNumber')} className="input-field" placeholder="TS0920200012345" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Bank Account</label>
-                        <input {...register('bankAccountNumber')} className="input-field" placeholder="Account number" />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">IFSC</label>
-                        <input {...register('bankIFSC')} className="input-field" placeholder="SBIN0001234" />
-                      </div>
-                    </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">DL Number</label>
+                    <input {...register('licenseNumber')} className="input-field" placeholder="TS0920200012345" />
                   </div>
+                </section>
+                <section>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Bank Verification</p>
+                  <RiderBankVerificationSection rider={editTarget} register={register} watch={watch} errors={errors} />
                 </section>
                 <motion.button type="submit" disabled={isSubmitting} whileTap={{ scale: 0.97 }} className="btn-primary w-full disabled:opacity-60">
                   {isSubmitting
