@@ -28,6 +28,7 @@ import ReviewsManagement from './pages/Admin/ReviewsManagement';
 import RatingAppeals from './pages/Admin/RatingAppeals';
 import SOSAlerts from './pages/Admin/SOSAlerts';
 import DailySettlements from './pages/Admin/DailySettlements';
+import CashfreeSettlements from './pages/Admin/CashfreeSettlements';
 import Commission from './pages/Admin/Commission';
 import SurgePricing from './pages/Admin/SurgePricing';
 import WalletSubscription from './pages/Admin/WalletSubscription';
@@ -97,6 +98,7 @@ export default function App() {
                 <Route path="rating-appeals" element={<RatingAppeals />} />
                 <Route path="sos-alerts" element={<SOSAlerts />} />
                 <Route path="settlements" element={<DailySettlements />} />
+                <Route path="cashfree-settlements" element={<CashfreeSettlements />} />
                 <Route path="commission" element={<Commission />} />
                 <Route path="surge-pricing" element={<SurgePricing />} />
                 <Route path="wallet" element={<WalletSubscription />} />

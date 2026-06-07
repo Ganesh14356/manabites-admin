@@ -5,7 +5,7 @@ import {
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
-  Headphones, Receipt, Gavel, ClipboardList, Radar,
+  Headphones, Receipt, Gavel, ClipboardList, Radar, Banknote,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -37,6 +37,7 @@ const BASE_NAV = [
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
+  { name: 'Cashfree Payouts',    path: '/admin/cashfree-settlements', icon: Banknote    },
   { name: 'Expenses',            path: '/admin/expenses',             icon: Receipt     },
   { name: 'Fines',               path: '/admin/fines',                icon: Gavel       },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
