@@ -5,8 +5,11 @@ import {
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch,
   Timestamp,
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../../firebase';
+import { db } from '../../firebase';
+
+const CLOUDINARY_CLOUD  = 'dfgpn29zt';
+const CLOUDINARY_PRESET = 'manabites_banners';
+
 import {
   Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, GripVertical,
   BarChart2, Clock, Calendar, MousePointer, ShoppingBag, Upload, ImageIcon, VideoIcon, Link2,
@@ -114,56 +117,58 @@ function MediaUploader({
     });
 
   const [uploadSpeed, setUploadSpeed] = useState('');
-  const speedRef = useRef<{ bytes: number; time: number } | null>(null);
 
-  const doUpload = useCallback((blob: Blob, mimeType: string, ext: string, isVideo: boolean) => {
-    const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const sRef = storageRef(storage, path);
-    const task = uploadBytesResumable(sRef, blob, { contentType: mimeType });
-    speedRef.current = { bytes: 0, time: Date.now() };
+  const doUpload = useCallback((blob: Blob, isVideo: boolean) => {
+    const fd = new FormData();
+    fd.append('file', blob);
+    fd.append('upload_preset', CLOUDINARY_PRESET);
 
-    setProgress(0);
-    task.on(
-      'state_changed',
-      snap => {
-        const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100);
-        setProgress(pct);
-        const now = Date.now();
-        const elapsed = (now - speedRef.current!.time) / 1000;
-        const bytesDelta = snap.bytesTransferred - speedRef.current!.bytes;
-        if (elapsed > 0.5) {
-          const kbps = bytesDelta / elapsed / 1024;
-          setUploadSpeed(kbps > 1024 ? `${(kbps / 1024).toFixed(1)} MB/s` : `${Math.round(kbps)} KB/s`);
-          speedRef.current = { bytes: snap.bytesTransferred, time: now };
-        }
-      },
-      () => { toast.error('Upload failed — check Firebase Storage rules'); setProgress(null); setUploadSpeed(''); },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        onChange(url, isVideo ? 'video' : 'image');
+    const xhr = new XMLHttpRequest();
+    const resourceType = isVideo ? 'video' : 'image';
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/${resourceType}/upload`);
+
+    let lastLoaded = 0, lastTime = Date.now();
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
+      const pct = Math.round(e.loaded / e.total * 100);
+      setProgress(pct);
+      const now = Date.now();
+      const elapsed = (now - lastTime) / 1000;
+      if (elapsed > 0.4) {
+        const kbps = (e.loaded - lastLoaded) / elapsed / 1024;
+        setUploadSpeed(kbps > 1024 ? `${(kbps / 1024).toFixed(1)} MB/s` : `${Math.round(kbps)} KB/s`);
+        lastLoaded = e.loaded; lastTime = now;
+      }
+    };
+    xhr.onload = () => {
+      const res = JSON.parse(xhr.responseText);
+      if (res.secure_url) {
+        onChange(res.secure_url, isVideo ? 'video' : 'image');
         setProgress(null); setUploadSpeed('');
         toast.success('Uploaded!');
-      },
-    );
+      } else {
+        toast.error('Upload failed'); setProgress(null); setUploadSpeed('');
+      }
+    };
+    xhr.onerror = () => { toast.error('Upload failed'); setProgress(null); setUploadSpeed(''); };
+    setProgress(0);
+    xhr.send(fd);
   }, [onChange]);
 
   const upload = useCallback(async (file: File) => {
     const isVideo = file.type.startsWith('video/');
     const isImage = file.type.startsWith('image/');
     if (!isVideo && !isImage) { toast.error('Only images and videos allowed'); return; }
-    if (file.size > 50 * 1024 * 1024) { toast.error('Max file size: 50 MB'); return; }
-
-    const ext = file.name.split('.').pop() ?? (isVideo ? 'mp4' : 'jpg');
+    if (file.size > 100 * 1024 * 1024) { toast.error('Max file size: 100 MB'); return; }
 
     if (isImage && !file.type.includes('gif')) {
-      setProgress(0);
       const before = (file.size / 1024).toFixed(0);
       const blob = await compressImage(file);
       const after = (blob.size / 1024).toFixed(0);
       toast(`Compressed ${before}KB → ${after}KB`, { icon: '⚡' });
-      doUpload(blob, 'image/jpeg', 'jpg', false);
+      doUpload(blob, false);
     } else {
-      doUpload(file, file.type, ext, isVideo);
+      doUpload(file, isVideo);
     }
   }, [doUpload]);
 
