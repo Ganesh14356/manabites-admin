@@ -1,12 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch,
   Timestamp,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, GripVertical, BarChart2, Clock, Calendar, MousePointer, ShoppingBag } from 'lucide-react';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../../firebase';
+import {
+  Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, GripVertical,
+  BarChart2, Clock, Calendar, MousePointer, ShoppingBag, Upload, ImageIcon, VideoIcon, Link2,
+} from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import {
@@ -24,6 +28,11 @@ interface Banner {
   code: string;
   emoji: string;
   gradient: string;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
+  discountPercent?: number;
+  discountMax?: number;
+  minOrder?: number;
   isActive: boolean;
   order: number;
   createdAt: any;
@@ -68,7 +77,151 @@ type FormData = {
   title: string; subtitle: string; code: string;
   emoji: string; gradient: string; order: string;
   startAt: string; endAt: string;
+  discountPercent: string; discountMax: string; minOrder: string;
+  mediaUrl: string;
 };
+
+// ── Media Uploader ─────────────────────────────────────────────────────────────
+
+function MediaUploader({
+  value, onChange,
+}: {
+  value: string;
+  onChange: (url: string, type: 'image' | 'video') => void;
+}) {
+  const [mode, setMode]         = useState<'url' | 'upload'>('upload');
+  const [urlInput, setUrlInput] = useState(value || '');
+  const [progress, setProgress] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = useCallback((file: File) => {
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) { toast.error('Only images and videos allowed'); return; }
+    if (file.size > 50 * 1024 * 1024) { toast.error('Max file size: 50 MB'); return; }
+
+    const ext  = file.name.split('.').pop();
+    const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const sRef = storageRef(storage, path);
+    const task = uploadBytesResumable(sRef, file, { contentType: file.type });
+
+    setProgress(0);
+    task.on(
+      'state_changed',
+      snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
+      () => { toast.error('Upload failed'); setProgress(null); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        onChange(url, isVideo ? 'video' : 'image');
+        setProgress(null);
+        toast.success('Uploaded!');
+      },
+    );
+  }, [onChange]);
+
+  const handleFiles = (files: FileList | null) => {
+    if (files?.[0]) upload(files[0]);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    handleFiles(e.dataTransfer.files);
+  };
+
+  const applyUrl = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    const isVideo = /\.(mp4|webm|mov|avi)(\?|$)/i.test(url);
+    onChange(url, isVideo ? 'video' : 'image');
+    toast.success('URL set!');
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Mode toggle */}
+      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+        <button type="button" onClick={() => setMode('upload')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'upload' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+          <Upload className="w-3.5 h-3.5" /> Upload File
+        </button>
+        <button type="button" onClick={() => setMode('url')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${mode === 'url' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+          <Link2 className="w-3.5 h-3.5" /> Paste URL
+        </button>
+      </div>
+
+      {mode === 'upload' ? (
+        <div
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => inputRef.current?.click()}
+          className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${dragOver ? 'border-brand bg-brand/5' : 'border-gray-200 hover:border-brand/50 hover:bg-gray-50'}`}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={e => handleFiles(e.target.files)}
+          />
+          {progress !== null ? (
+            <div className="space-y-2">
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="bg-brand h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+              </div>
+              <p className="text-sm font-bold text-brand">Uploading... {progress}%</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-center gap-3 mb-3">
+                <ImageIcon className="w-6 h-6 text-gray-300" />
+                <VideoIcon className="w-6 h-6 text-gray-300" />
+              </div>
+              <p className="text-sm font-bold text-gray-600">Drop image / video here</p>
+              <p className="text-xs text-gray-400 mt-1">or click to browse · JPG, PNG, GIF, MP4, WebM · max 50 MB</p>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            value={urlInput}
+            onChange={e => setUrlInput(e.target.value)}
+            placeholder="https://... (image, GIF, or video URL)"
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand"
+            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), applyUrl())}
+          />
+          <button type="button" onClick={applyUrl}
+            className="px-3 py-2 bg-brand text-white text-sm font-bold rounded-xl hover:bg-brand/90 transition-colors">
+            Set
+          </button>
+        </div>
+      )}
+
+      {/* Preview */}
+      {value && (
+        <div className="relative rounded-xl overflow-hidden bg-black group">
+          {/\.(mp4|webm|mov)(\?|$)/i.test(value) || value.includes('firebasestorage') && /video/.test(value) ? (
+            <video src={value} className="w-full h-32 object-cover" muted loop autoPlay playsInline />
+          ) : (
+            <img src={value} alt="preview" className="w-full h-32 object-cover"
+              onError={e => (e.currentTarget.parentElement!.style.display = 'none')} />
+          )}
+          <button
+            type="button"
+            onClick={() => onChange('', 'image')}
+            className="absolute top-2 right-2 w-6 h-6 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <X className="w-3.5 h-3.5 text-white" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Sortable banner row ───────────────────────────────────────────────────────
 
@@ -104,10 +257,18 @@ function SortableBannerRow({
           <GripVertical className="w-4 h-4" />
         </button>
 
-        {/* Preview */}
-        <div className={`w-12 h-12 bg-gradient-to-br ${banner.gradient} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}>
-          {banner.emoji}
-        </div>
+        {/* Preview thumbnail */}
+        {banner.mediaUrl ? (
+          banner.mediaType === 'video' ? (
+            <video src={banner.mediaUrl} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" muted autoPlay loop playsInline />
+          ) : (
+            <img src={banner.mediaUrl} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+          )
+        ) : (
+          <div className={`w-12 h-12 bg-gradient-to-br ${banner.gradient} rounded-xl flex items-center justify-center text-xl flex-shrink-0`}>
+            {banner.emoji}
+          </div>
+        )}
 
         {/* Info */}
         <div className="flex-1 min-w-0">
@@ -115,9 +276,9 @@ function SortableBannerRow({
             <p className="font-black text-gray-900 text-sm truncate">{banner.title}</p>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>
             {banner.code && <span className="text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-full">{banner.code}</span>}
+            {banner.discountPercent ? <span className="text-[10px] font-black text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">{banner.discountPercent}% OFF</span> : null}
           </div>
           <p className="text-xs text-gray-500 truncate">{banner.subtitle}</p>
-          {/* Analytics row */}
           {analytics && (
             <div className="flex items-center gap-3 mt-1">
               <span className="flex items-center gap-1 text-[10px] text-gray-400 font-bold">
@@ -166,11 +327,16 @@ export default function Banners() {
   const [editTarget, setEditTarget] = useState<Banner | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [mediaUrl, setMediaUrl]   = useState('');
+  const [mediaType, setMediaType] = useState<'image' | 'video'>('image');
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<FormData>({
-    defaultValues: { gradient: GRADIENT_OPTIONS[0].value, emoji: '🎉', order: '0', startAt: '', endAt: '' },
+    defaultValues: {
+      gradient: GRADIENT_OPTIONS[0].value, emoji: '🎉', order: '0',
+      startAt: '', endAt: '', discountPercent: '', discountMax: '', minOrder: '', mediaUrl: '',
+    },
   });
 
   const watchGradient = watch('gradient');
@@ -179,7 +345,6 @@ export default function Banners() {
   const watchSubtitle = watch('subtitle');
   const watchCode     = watch('code');
 
-  // Banners listener
   useEffect(() => {
     const q = query(collection(db, 'banners'), orderBy('order', 'asc'));
     return onSnapshot(q, snap => {
@@ -188,7 +353,6 @@ export default function Banners() {
     }, () => { toast.error('Failed to load banners'); setLoading(false); });
   }, []);
 
-  // Analytics listener
   useEffect(() => {
     return onSnapshot(collection(db, 'bannerAnalytics'), snap => {
       const map: Record<string, BannerAnalytics> = {};
@@ -206,16 +370,27 @@ export default function Banners() {
 
   const openAdd = () => {
     setEditTarget(null);
-    reset({ title: '', subtitle: '', code: '', emoji: '🎉', gradient: GRADIENT_OPTIONS[0].value, order: String(banners.length), startAt: '', endAt: '' });
+    setMediaUrl(''); setMediaType('image');
+    reset({
+      title: '', subtitle: '', code: '', emoji: '🎉',
+      gradient: GRADIENT_OPTIONS[0].value, order: String(banners.length),
+      startAt: '', endAt: '', discountPercent: '', discountMax: '', minOrder: '', mediaUrl: '',
+    });
     setShowModal(true);
   };
 
   const openEdit = (b: Banner) => {
     setEditTarget(b);
+    setMediaUrl(b.mediaUrl || '');
+    setMediaType(b.mediaType || 'image');
     reset({
       title: b.title, subtitle: b.subtitle, code: b.code || '', emoji: b.emoji,
       gradient: b.gradient, order: String(b.order),
       startAt: toDatetimeLocal(b.startAt), endAt: toDatetimeLocal(b.endAt),
+      discountPercent: b.discountPercent ? String(b.discountPercent) : '',
+      discountMax: b.discountMax ? String(b.discountMax) : '',
+      minOrder: b.minOrder ? String(b.minOrder) : '',
+      mediaUrl: b.mediaUrl || '',
     });
     setShowModal(true);
   };
@@ -230,6 +405,11 @@ export default function Banners() {
         isActive: editTarget?.isActive ?? true,
         startAt: toTimestamp(data.startAt),
         endAt:   toTimestamp(data.endAt),
+        mediaUrl:        mediaUrl || null,
+        mediaType:       mediaUrl ? mediaType : null,
+        discountPercent: data.discountPercent ? Number(data.discountPercent) : null,
+        discountMax:     data.discountMax ? Number(data.discountMax) : null,
+        minOrder:        data.minOrder ? Number(data.minOrder) : null,
       };
       if (editTarget) {
         await updateDoc(doc(db, 'banners', editTarget.id), payload);
@@ -243,8 +423,8 @@ export default function Banners() {
     finally { setIsSubmitting(false); }
   };
 
-  const toggleActive  = async (b: Banner) => { await updateDoc(doc(db, 'banners', b.id), { isActive: !b.isActive }); };
-  const deleteBanner  = async (b: Banner) => {
+  const toggleActive = async (b: Banner) => { await updateDoc(doc(db, 'banners', b.id), { isActive: !b.isActive }); };
+  const deleteBanner = async (b: Banner) => {
     if (!confirm(`Delete "${b.title}"?`)) return;
     await deleteDoc(doc(db, 'banners', b.id));
     toast.success('Banner deleted');
@@ -263,14 +443,12 @@ export default function Banners() {
     toast.success('Order saved');
   }, [banners]);
 
-  // Summary analytics
   const totalClicks = Object.values(analytics).reduce((s, a) => s + (a.totalClicks ?? 0), 0);
   const totalConversions = Object.values(analytics).reduce((s, a) => s + (a.totalConversions ?? 0), 0);
   const overallCVR = totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(1) : '0.0';
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      {/* Header */}
       <motion.div className="flex items-center justify-between mb-6" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }}>
         <div>
           <h1 className="text-2xl font-black text-gray-900">Offer Banners</h1>
@@ -285,7 +463,6 @@ export default function Banners() {
         </div>
       </motion.div>
 
-      {/* Analytics summary */}
       <AnimatePresence>
         {showAnalytics && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
@@ -332,7 +509,6 @@ export default function Banners() {
         </DndContext>
       )}
 
-      {/* Modal / slide-over */}
       <AnimatePresence>
         {showModal && (
           <>
@@ -348,13 +524,25 @@ export default function Banners() {
                 <button onClick={() => setShowModal(false)} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><X className="w-4 h-4" /></button>
               </div>
               <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-5">
+
                 {/* Live preview */}
-                <div className={`h-28 bg-gradient-to-br ${watchGradient} rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden`}>
+                <div className={`h-28 bg-gradient-to-br ${watchGradient} rounded-2xl relative overflow-hidden`}>
+                  {mediaUrl && (
+                    mediaType === 'video'
+                      ? <video src={mediaUrl} className="absolute inset-0 w-full h-full object-cover" muted autoPlay loop playsInline />
+                      : <img src={mediaUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  )}
+                  <div className="absolute inset-0 bg-black/30" />
+                  <div className="absolute inset-0 p-5 flex flex-col justify-between">
+                    <p className="text-white text-[10px] font-black uppercase tracking-widest opacity-80">{watchSubtitle || 'Subtitle'}</p>
+                    <div>
+                      <p className="text-white text-xl font-black">{watchTitle || 'Offer Title'}</p>
+                      {watchCode && <span className="text-[9px] font-black text-white/80 border border-dashed border-white/50 px-2 py-0.5 rounded">{watchCode}</span>}
+                    </div>
+                  </div>
                   <span className="absolute -right-3 -bottom-3 text-7xl opacity-20 rotate-12">{watchEmoji}</span>
-                  <p className="text-white text-[10px] font-black uppercase tracking-widest opacity-80">{watchSubtitle || 'Subtitle'}</p>
-                  <p className="text-white text-xl font-black">{watchTitle || 'Offer Title'}</p>
-                  {watchCode && <span className="text-[9px] font-black text-white/80 border border-dashed border-white/50 px-2 py-0.5 rounded w-fit">{watchCode}</span>}
                 </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Offer Title *</label>
                   <input {...register('title', { required: true })} placeholder="50% OFF up to ₹100" className={`input-field ${errors.title ? 'border-red-400' : ''}`} />
@@ -363,10 +551,46 @@ export default function Banners() {
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Subtitle *</label>
                   <input {...register('subtitle', { required: true })} placeholder="First order special" className={`input-field ${errors.subtitle ? 'border-red-400' : ''}`} />
                 </div>
+
+                {/* Media upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Banner Image / Video
+                  </label>
+                  <MediaUploader
+                    value={mediaUrl}
+                    onChange={(url, type) => { setMediaUrl(url); setMediaType(type); setValue('mediaUrl', url); }}
+                  />
+                </div>
+
+                {/* Discount */}
+                <div className="border border-dashed border-orange-200 rounded-2xl p-4 bg-orange-50/50 space-y-3">
+                  <p className="font-black text-sm text-orange-700">🏷️ Offer / Discount (optional)</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Discount %</label>
+                      <input {...register('discountPercent')} type="number" min="0" max="100" placeholder="50"
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Max ₹</label>
+                      <input {...register('discountMax')} type="number" min="0" placeholder="100"
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-500 mb-1">Min Order</label>
+                      <input {...register('minOrder')} type="number" min="0" placeholder="199"
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand bg-white" />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-orange-500">e.g. 50% OFF up to ₹100 on orders above ₹199</p>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Coupon Code (optional)</label>
                   <input {...register('code')} placeholder="NEWUSER50" className="input-field" />
                 </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Emoji</label>
                   <div className="flex gap-2 flex-wrap">
@@ -387,7 +611,7 @@ export default function Banners() {
                     ))}
                   </div>
                 </div>
-                {/* Schedule */}
+
                 <div className="bg-blue-50 rounded-2xl p-4 space-y-3">
                   <p className="text-xs font-black text-blue-700 uppercase tracking-wider flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Schedule (optional)</p>
                   <div>
