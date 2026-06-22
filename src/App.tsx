@@ -46,8 +46,15 @@ import FranchiseManager from './pages/Admin/FranchiseManager';
 import AIInsights from './pages/Admin/AIInsights';
 import Complaints from './pages/Admin/Complaints';
 import CustomerCare from './pages/Admin/CustomerCare';
+import SupportChats from './pages/Admin/SupportChats';
+import DirectChat from './pages/Admin/DirectChat';
+import ManaBitesSupport from './pages/Admin/ManaBitesSupport';
 import Expenses from './pages/Admin/Expenses';
 import Fines from './pages/Admin/Fines';
+import ActivityLogs from './pages/Admin/ActivityLogs';
+import GroceryStores from './pages/Admin/GroceryStores';
+import GroceryProducts from './pages/Admin/GroceryProducts';
+import GroceryOrders from './pages/Admin/GroceryOrders';
 
 export default function App() {
   return (
@@ -103,6 +110,7 @@ export default function App() {
                 <Route path="surge-pricing" element={<SurgePricing />} />
                 <Route path="wallet" element={<WalletSubscription />} />
                 <Route path="sub-admins" element={<SubAdminManagement />} />
+                <Route path="activity-logs" element={<ActivityLogs />} />
                 <Route path="geo-marketing" element={<GeoMarketing />} />
                 <Route path="whatsapp" element={<WhatsAppAutomation />} />
                 <Route path="rider-incentives" element={<RiderIncentives />} />
@@ -116,8 +124,14 @@ export default function App() {
                 <Route path="ai-insights" element={<AIInsights />} />
                 <Route path="complaints" element={<Complaints />} />
                 <Route path="customer-care" element={<CustomerCare />} />
+                <Route path="support-chats" element={<SupportChats />} />
+                <Route path="direct-chat" element={<DirectChat />} />
+                <Route path="support" element={<ManaBitesSupport />} />
                 <Route path="expenses" element={<Expenses />} />
                 <Route path="fines" element={<Fines />} />
+                <Route path="grocery-stores"   element={<GroceryStores />} />
+                <Route path="grocery-products" element={<GroceryProducts />} />
+                <Route path="grocery-orders"   element={<GroceryOrders />} />
                 {/* Legacy alias */}
                 <Route path="delivery-settings" element={<Navigate to="/admin/settings" replace />} />
               </Route>

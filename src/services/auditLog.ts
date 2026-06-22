@@ -2,17 +2,21 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export type AuditAction =
-  | 'RIDER_CREATED'
-  | 'RIDER_EDITED'
-  | 'RIDER_APPROVED'
-  | 'RIDER_REJECTED'
-  | 'RIDER_SUSPENDED'
-  | 'RIDER_ACTIVATED'
-  | 'RIDER_DELETED'
-  | 'RIDER_LOGIN_CREATED'
-  | 'RIDER_BANK_VERIFIED'
-  | 'RIDER_BANK_VERIFICATION_FAILED'
-  | 'RIDER_DOCUMENT_VERIFIED';
+  // Rider actions
+  | 'RIDER_CREATED' | 'RIDER_EDITED' | 'RIDER_APPROVED' | 'RIDER_REJECTED'
+  | 'RIDER_SUSPENDED' | 'RIDER_ACTIVATED' | 'RIDER_DELETED'
+  | 'RIDER_LOGIN_CREATED' | 'RIDER_BANK_VERIFIED'
+  | 'RIDER_BANK_VERIFICATION_FAILED' | 'RIDER_DOCUMENT_VERIFIED'
+  // Sub-admin actions
+  | 'SUBADMIN_CREATED' | 'SUBADMIN_EDITED' | 'SUBADMIN_SUSPENDED'
+  | 'SUBADMIN_ACTIVATED' | 'SUBADMIN_DELETED' | 'SUBADMIN_PASSWORD_RESET'
+  | 'SUBADMIN_PERMISSIONS_CHANGED'
+  // Restaurant actions
+  | 'RESTAURANT_APPROVED' | 'RESTAURANT_REJECTED' | 'RESTAURANT_SUSPENDED'
+  // Order/finance actions
+  | 'REFUND_PROCESSED' | 'PAYOUT_RELEASED' | 'COMMISSION_CHANGED'
+  // Auth actions
+  | 'ADMIN_LOGIN' | 'ADMIN_LOGOUT';
 
 interface LogAuditEventParams {
   action: AuditAction;
@@ -25,11 +29,6 @@ interface LogAuditEventParams {
   details?: Record<string, unknown>;
 }
 
-/**
- * Records an admin action to the `auditLogs` collection. Failures are swallowed —
- * an audit-trail write must never block or fail the primary action it documents
- * (mirrors the defensive pattern used for `bankVerificationLogs` in RestaurantManagement).
- */
 export async function logAuditEvent(params: LogAuditEventParams): Promise<void> {
   try {
     await addDoc(collection(db, 'auditLogs'), {
@@ -42,8 +41,9 @@ export async function logAuditEvent(params: LogAuditEventParams): Promise<void> 
       adminEmail: params.adminEmail ?? null,
       details: params.details ?? {},
       timestamp: serverTimestamp(),
+      userAgent: navigator.userAgent,
     });
   } catch (err: any) {
-    console.error('[auditLog] failed to record event:', params.action, err?.code ?? err?.message);
+    console.error('[auditLog] failed:', params.action, err?.code ?? err?.message);
   }
 }

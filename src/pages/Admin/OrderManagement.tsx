@@ -36,6 +36,8 @@ interface OrderDoc {
   riderArrivedAt?: Timestamp;
   estimatedCookingMins?: number;
   deliveryOtpVerified?: boolean;
+  deliveryOtp?: string;
+  displayOrderId?: string;
   deliveryPhotoUrl?: string;
   geofenceFailed?: boolean;
   suspicious?: boolean;
@@ -531,38 +533,73 @@ export default function OrderManagement() {
                 </div>
 
                 {/* Delivery Verification */}
-                {(selectedOrder.deliveryOtpVerified !== undefined || selectedOrder.geofenceFailed || selectedOrder.deliveryPhotoUrl) && (
-                  <div>
-                    <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">Delivery Verification</h3>
-                    <div className="space-y-2">
-                      {selectedOrder.deliveryOtpVerified !== undefined && (
-                        <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${selectedOrder.deliveryOtpVerified ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
-                          <span>{selectedOrder.deliveryOtpVerified ? '✅' : '⏳'}</span>
-                          <span className="font-bold">OTP {selectedOrder.deliveryOtpVerified ? 'Verified' : 'Not yet verified'}</span>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">Delivery Verification</h3>
+                  <div className="space-y-2">
+                    {/* Order ID */}
+                    {(selectedOrder as any).displayOrderId && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-gray-50 text-gray-700">
+                        <span>🆔</span>
+                        <span className="font-mono font-bold">{(selectedOrder as any).displayOrderId}</span>
+                      </div>
+                    )}
+                    {/* OTP code — admin only */}
+                    {selectedOrder.deliveryOtp && (
+                      <div className="flex items-center justify-between px-3 py-2 rounded-lg text-sm bg-orange-50 text-orange-700">
+                        <div className="flex items-center gap-2">
+                          <span>🔑</span>
+                          <span className="font-bold">Delivery OTP:</span>
+                          <span className="font-mono text-lg font-black tracking-widest">{selectedOrder.deliveryOtp}</span>
                         </div>
-                      )}
-                      {selectedOrder.deliveryPhotoUrl && (
-                        <a href={selectedOrder.deliveryPhotoUrl} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">
-                          <span>📷</span>
-                          <span className="font-bold">View Delivery Photo</span>
-                        </a>
-                      )}
-                      {selectedOrder.geofenceFailed && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-red-50 text-red-700">
-                          <span>🚨</span>
-                          <span className="font-bold">Suspicious: Rider was &gt;50m from delivery location</span>
-                        </div>
-                      )}
-                      {selectedOrder.waitTimeMins && selectedOrder.waitTimeMins > 10 && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-yellow-50 text-yellow-700">
-                          <span>⏱️</span>
-                          <span className="font-bold">Rider waited {selectedOrder.waitTimeMins} min at restaurant</span>
-                        </div>
-                      )}
-                    </div>
+                        <button
+                          onClick={() => navigator.clipboard.writeText(selectedOrder.deliveryOtp!).then(() => toast.success('OTP copied')).catch(() => {})}
+                          className="text-xs bg-orange-100 hover:bg-orange-200 px-2 py-1 rounded font-bold"
+                        >Copy</button>
+                      </div>
+                    )}
+                    {/* OTP verified status */}
+                    {selectedOrder.deliveryOtpVerified !== undefined && (
+                      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${selectedOrder.deliveryOtpVerified ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                        <span>{selectedOrder.deliveryOtpVerified ? '✅' : '⏳'}</span>
+                        <span className="font-bold">OTP {selectedOrder.deliveryOtpVerified ? 'Verified' : 'Not yet verified'}</span>
+                      </div>
+                    )}
+                    {selectedOrder.deliveryPhotoUrl && (
+                      <a href={selectedOrder.deliveryPhotoUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-blue-50 text-blue-700 hover:bg-blue-100">
+                        <span>📷</span>
+                        <span className="font-bold">View Delivery Photo</span>
+                      </a>
+                    )}
+                    {selectedOrder.geofenceFailed && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-red-50 text-red-700">
+                        <span>🚨</span>
+                        <span className="font-bold">Suspicious: Rider was &gt;50m from delivery location</span>
+                      </div>
+                    )}
+                    {selectedOrder.waitTimeMins && selectedOrder.waitTimeMins > 10 && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-yellow-50 text-yellow-700">
+                        <span>⏱️</span>
+                        <span className="font-bold">Rider waited {selectedOrder.waitTimeMins} min at restaurant</span>
+                      </div>
+                    )}
+                    {/* Regenerate OTP */}
+                    {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
+                      <button
+                        onClick={async () => {
+                          const newOtp = String(1000 + Math.floor(Math.random() * 9000));
+                          try {
+                            await updateDoc(doc(db, 'orders', selectedOrder.id), { deliveryOtp: newOtp });
+                            toast.success(`New OTP generated: ${newOtp}`);
+                          } catch { toast.error('Failed to regenerate OTP'); }
+                        }}
+                        className="w-full py-2 bg-orange-50 text-orange-700 font-bold rounded-xl text-sm hover:bg-orange-100 flex items-center justify-center gap-2"
+                      >
+                        🔄 Regenerate Delivery OTP
+                      </button>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
 
               {/* ── Order Timeline ─────────────────────────────────────── */}
@@ -637,6 +674,25 @@ export default function OrderManagement() {
                       className="w-full py-2.5 bg-blue-50 text-blue-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-blue-100"
                     >
                       <RefreshCw className="w-4 h-4" /> Reassign Rider
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Override delivery? This marks the order as delivered without OTP verification.')) return;
+                        try {
+                          await updateDoc(doc(db, 'orders', selectedOrder.id), {
+                            status: 'delivered',
+                            deliveredAt: Timestamp.now(),
+                            deliveryOtpVerified: false,
+                            adminOverride: true,
+                            adminOverrideAt: Timestamp.now(),
+                            updatedAt: Timestamp.now(),
+                          });
+                          toast.success('Order marked as delivered (admin override)');
+                        } catch { toast.error('Override failed'); }
+                      }}
+                      className="w-full py-2.5 bg-green-50 text-green-700 font-bold rounded-xl text-sm hover:bg-green-100 flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle className="w-4 h-4" /> Override Delivery (Admin)
                     </button>
                     <button
                       onClick={() => handleCancelOrder(selectedOrder.id)}

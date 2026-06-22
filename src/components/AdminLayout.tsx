@@ -5,7 +5,8 @@ import {
   MapPin, TrendingUp, Target, Bell, RefreshCw, Star, AlertTriangle, MessageSquareWarning,
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
-  Headphones, Receipt, Gavel, ClipboardList, Radar, Banknote,
+  Headphones, Receipt, Gavel, ClipboardList, Radar, Banknote, Activity,
+  ShoppingCart, Package, Warehouse,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -18,6 +19,7 @@ import ChatDrawer from './ChatDrawer';
 
 const BASE_NAV = [
   { name: 'Analytics',            path: '/admin/analytics',            icon: BarChart2  },
+  { name: 'ManaBites Support',    path: '/admin/support',              icon: Headphones },
   { name: 'Orders',               path: '/admin/orders',               icon: ShoppingBag },
   { name: 'Restaurants',          path: '/admin/restaurants',          icon: Store      },
   { name: 'Approvals',            path: '/admin/restaurants-approval', icon: ShieldCheck },
@@ -44,6 +46,7 @@ const BASE_NAV = [
   { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
   { name: 'Wallet & Gold',      path: '/admin/wallet',               icon: Wallet      },
   { name: 'Sub-Admins',         path: '/admin/sub-admins',           icon: Shield      },
+  { name: 'Activity Logs',      path: '/admin/activity-logs',        icon: Activity    },
   { name: 'Geo Marketing',      path: '/admin/geo-marketing',        icon: Crosshair   },
   { name: 'WhatsApp / SMS',     path: '/admin/whatsapp',             icon: MessageCircle },
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
@@ -57,6 +60,10 @@ const BASE_NAV = [
   { name: 'City Manager',         path: '/admin/cities',               icon: Globe      },
   { name: 'Franchises',           path: '/admin/franchises',           icon: Building2  },
   { name: 'AI Insights',          path: '/admin/ai-insights',          icon: Brain      },
+  { name: '── Grocery ──',         path: '',                            icon: ShoppingCart, divider: true },
+  { name: 'Grocery Stores',       path: '/admin/grocery-stores',       icon: Warehouse  },
+  { name: 'Grocery Products',     path: '/admin/grocery-products',     icon: Package    },
+  { name: 'Grocery Orders',       path: '/admin/grocery-orders',       icon: ShoppingCart },
   { name: 'Verticals Hub',        path: '/admin/verticals',            icon: Rocket     },
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
@@ -203,24 +210,19 @@ export default function AdminLayout() {
 
   // Filter sidebar by role
   const NAV_ITEMS = (() => {
+    // Legacy franchise role
     if (subAdminRole === 'franchise') {
       return BASE_NAV.filter(item => FRANCHISE_NAV_KEYS.includes(item.path));
     }
-    if (subAdminRole === 'support' && subAdminPerms) {
+    // Any sub-admin with a permissions list — filter nav to allowed modules
+    if (subAdminPerms && subAdminPerms.length > 0) {
       const allowed = new Set(subAdminPerms);
       return BASE_NAV.filter(item => {
         const key = item.path.replace('/admin/', '');
         return key === 'analytics' || allowed.has(key);
       });
     }
-    if (subAdminRole === 'finance' && subAdminPerms) {
-      const allowed = new Set(subAdminPerms);
-      return BASE_NAV.filter(item => {
-        const key = item.path.replace('/admin/', '');
-        return key === 'analytics' || allowed.has(key);
-      });
-    }
-    return BASE_NAV; // super admin sees everything
+    return BASE_NAV; // super admin / main admin sees everything
   })();
 
   const activeNav = NAV_ITEMS.find(item => location.pathname.startsWith(item.path));
@@ -266,8 +268,18 @@ export default function AdminLayout() {
         {/* Navigation */}
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto dark:border-gray-700">
           {NAV_ITEMS.map((item, idx) => {
-            const isActive = location.pathname.startsWith(item.path);
+            const isActive = item.path && location.pathname.startsWith(item.path);
             const Icon = item.icon;
+            // Section divider
+            if ((item as any).divider) {
+              return (
+                <div key={item.name} className="pt-3 pb-1 px-3">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500">
+                    {item.name.replace(/^──\s*/, '').replace(/\s*──$/, '')}
+                  </span>
+                </div>
+              );
+            }
             return (
               <motion.div
                 key={item.name}

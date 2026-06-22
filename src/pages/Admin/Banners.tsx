@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import ReactCrop, { type Crop, centerCrop, makeAspectCrop } from 'react-image-crop';
+import 'react-image-crop/dist/ReactCrop.css';
 import {
   collection, onSnapshot, query, orderBy,
   addDoc, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch,
@@ -85,6 +87,24 @@ type FormData = {
 
 // ── Media Uploader ─────────────────────────────────────────────────────────────
 
+const BANNER_ASPECT = 2 / 1; // 2:1 landscape banner
+
+function getCroppedBlob(img: HTMLImageElement, crop: Crop): Promise<Blob> {
+  const scaleX = img.naturalWidth  / img.width;
+  const scaleY = img.naturalHeight / img.height;
+  const canvas = document.createElement('canvas');
+  canvas.width  = crop.width  * scaleX;
+  canvas.height = crop.height * scaleY;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img,
+    crop.x * scaleX, crop.y * scaleY, crop.width * scaleX, crop.height * scaleY,
+    0, 0, canvas.width, canvas.height,
+  );
+  return new Promise(resolve =>
+    canvas.toBlob(b => resolve(b!), 'image/jpeg', 0.88)
+  );
+}
+
 function MediaUploader({
   value, onChange,
 }: {
@@ -94,28 +114,14 @@ function MediaUploader({
   const [mode, setMode]         = useState<'url' | 'upload'>('upload');
   const [urlInput, setUrlInput] = useState(value || '');
   const [progress, setProgress] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const compressImage = (file: File): Promise<Blob> =>
-    new Promise((resolve) => {
-      const img = new Image();
-      const objectUrl = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        const MAX = 1200;
-        let { width, height } = img;
-        if (width > MAX) { height = Math.round(height * MAX / width); width = MAX; }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(blob => resolve(blob ?? file), 'image/jpeg', 0.82);
-      };
-      img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
-      img.src = objectUrl;
-    });
-
   const [uploadSpeed, setUploadSpeed] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef   = useRef<HTMLInputElement>(null);
+
+  // Crop state
+  const [cropSrc, setCropSrc]   = useState<string | null>(null);
+  const [crop, setCrop]         = useState<Crop>({ unit: '%', x: 0, y: 0, width: 100, height: 100 });
+  const imgRef                  = useRef<HTMLImageElement>(null);
 
   const doUpload = useCallback((blob: Blob, isVideo: boolean) => {
     const fd = new FormData();
@@ -123,16 +129,13 @@ function MediaUploader({
     fd.append('upload_preset', CLOUDINARY_PRESET);
 
     const xhr = new XMLHttpRequest();
-    const resourceType = isVideo ? 'video' : 'image';
-    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/${resourceType}/upload`);
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/${isVideo ? 'video' : 'image'}/upload`);
 
     let lastLoaded = 0, lastTime = Date.now();
     xhr.upload.onprogress = e => {
       if (!e.lengthComputable) return;
-      const pct = Math.round(e.loaded / e.total * 100);
-      setProgress(pct);
-      const now = Date.now();
-      const elapsed = (now - lastTime) / 1000;
+      setProgress(Math.round(e.loaded / e.total * 100));
+      const now = Date.now(), elapsed = (now - lastTime) / 1000;
       if (elapsed > 0.4) {
         const kbps = (e.loaded - lastLoaded) / elapsed / 1024;
         setUploadSpeed(kbps > 1024 ? `${(kbps / 1024).toFixed(1)} MB/s` : `${Math.round(kbps)} KB/s`);
@@ -146,7 +149,8 @@ function MediaUploader({
         setProgress(null); setUploadSpeed('');
         toast.success('Uploaded!');
       } else {
-        toast.error('Upload failed'); setProgress(null); setUploadSpeed('');
+        toast.error('Upload failed: ' + (res.error?.message || 'unknown'));
+        setProgress(null); setUploadSpeed('');
       }
     };
     xhr.onerror = () => { toast.error('Upload failed'); setProgress(null); setUploadSpeed(''); };
@@ -154,31 +158,35 @@ function MediaUploader({
     xhr.send(fd);
   }, [onChange]);
 
-  const upload = useCallback(async (file: File) => {
+  const handleFiles = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
     const isVideo = file.type.startsWith('video/');
     const isImage = file.type.startsWith('image/');
     if (!isVideo && !isImage) { toast.error('Only images and videos allowed'); return; }
-    if (file.size > 100 * 1024 * 1024) { toast.error('Max file size: 100 MB'); return; }
+    if (file.size > 100 * 1024 * 1024) { toast.error('Max 100 MB'); return; }
 
-    if (isImage && !file.type.includes('gif')) {
-      const before = (file.size / 1024).toFixed(0);
-      const blob = await compressImage(file);
-      const after = (blob.size / 1024).toFixed(0);
-      toast(`Compressed ${before}KB → ${after}KB`, { icon: '⚡' });
-      doUpload(blob, false);
-    } else {
+    if (isVideo || file.type.includes('gif')) {
       doUpload(file, isVideo);
+      return;
     }
-  }, [doUpload]);
-
-  const handleFiles = (files: FileList | null) => {
-    if (files?.[0]) upload(files[0]).catch(() => {});
+    // Image → open crop modal
+    const reader = new FileReader();
+    reader.onload = () => setCropSrc(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    handleFiles(e.dataTransfer.files);
+  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { width, height } = e.currentTarget;
+    setCrop(centerCrop(makeAspectCrop({ unit: '%', width: 100 }, BANNER_ASPECT, width, height), width, height));
+  };
+
+  const confirmCrop = async () => {
+    if (!imgRef.current || !crop.width || !crop.height) return;
+    const blob = await getCroppedBlob(imgRef.current, crop);
+    setCropSrc(null);
+    toast(`Cropped & compressed (${(blob.size / 1024).toFixed(0)} KB)`, { icon: '✂️' });
+    doUpload(blob, false);
   };
 
   const applyUrl = () => {
@@ -191,6 +199,54 @@ function MediaUploader({
 
   return (
     <div className="space-y-3">
+      {/* Crop modal */}
+      <AnimatePresence>
+        {cropSrc && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.92 }} animate={{ scale: 1 }} exit={{ scale: 0.92 }}
+              className="bg-white rounded-2xl overflow-hidden shadow-2xl max-w-lg w-full"
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <div>
+                  <p className="font-black text-gray-900">Crop Banner Image</p>
+                  <p className="text-xs text-gray-400 mt-0.5">2:1 ratio · drag to adjust</p>
+                </div>
+                <button type="button" onClick={() => setCropSrc(null)}
+                  className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4 bg-gray-50">
+                <ReactCrop
+                  crop={crop} onChange={c => setCrop(c)}
+                  aspect={BANNER_ASPECT} minWidth={80}
+                >
+                  <img
+                    ref={imgRef} src={cropSrc} alt="crop"
+                    onLoad={onImageLoad}
+                    className="max-h-[55vh] w-full object-contain"
+                  />
+                </ReactCrop>
+              </div>
+              <div className="flex gap-3 px-5 py-4">
+                <button type="button" onClick={() => setCropSrc(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button type="button" onClick={confirmCrop}
+                  className="flex-1 py-2.5 rounded-xl bg-brand text-white text-sm font-bold shadow">
+                  ✂️ Crop & Upload
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Mode toggle */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
         <button type="button" onClick={() => setMode('upload')}
@@ -207,28 +263,19 @@ function MediaUploader({
         <div
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => inputRef.current?.click()}
+          onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+          onClick={() => progress === null && inputRef.current?.click()}
           className={`relative border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${dragOver ? 'border-brand bg-brand/5' : 'border-gray-200 hover:border-brand/50 hover:bg-gray-50'}`}
         >
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*,video/*"
-            className="hidden"
-            onChange={e => handleFiles(e.target.files)}
-          />
+          <input ref={inputRef} type="file" accept="image/*,video/*" className="hidden"
+            onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           {progress !== null ? (
             <div className="space-y-2">
               <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
-                <motion.div
-                  className="bg-brand h-2.5 rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: `${progress}%` }}
-                  transition={{ ease: 'linear', duration: 0.3 }}
-                />
+                <motion.div className="bg-brand h-2.5 rounded-full"
+                  animate={{ width: `${progress}%` }} transition={{ ease: 'linear', duration: 0.3 }} />
               </div>
-              <div className="flex justify-between items-center">
+              <div className="flex justify-between">
                 <p className="text-sm font-bold text-brand">Uploading... {progress}%</p>
                 {uploadSpeed && <p className="text-xs text-gray-400 font-semibold">{uploadSpeed}</p>}
               </div>
@@ -240,21 +287,18 @@ function MediaUploader({
                 <VideoIcon className="w-6 h-6 text-gray-300" />
               </div>
               <p className="text-sm font-bold text-gray-600">Drop image / video here</p>
-              <p className="text-xs text-gray-400 mt-1">or click to browse · JPG, PNG, GIF, MP4, WebM · max 50 MB</p>
+              <p className="text-xs text-gray-400 mt-1">JPG, PNG, GIF, MP4, WebM · max 100 MB</p>
             </>
           )}
         </div>
       ) : (
         <div className="flex gap-2">
-          <input
-            value={urlInput}
-            onChange={e => setUrlInput(e.target.value)}
+          <input value={urlInput} onChange={e => setUrlInput(e.target.value)}
             placeholder="https://... (image, GIF, or video URL)"
             className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-brand"
-            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), applyUrl())}
-          />
+            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), applyUrl())} />
           <button type="button" onClick={applyUrl}
-            className="px-3 py-2 bg-brand text-white text-sm font-bold rounded-xl hover:bg-brand/90 transition-colors">
+            className="px-3 py-2 bg-brand text-white text-sm font-bold rounded-xl hover:bg-brand/90">
             Set
           </button>
         </div>
@@ -263,17 +307,13 @@ function MediaUploader({
       {/* Preview */}
       {value && (
         <div className="relative rounded-xl overflow-hidden bg-black group">
-          {/\.(mp4|webm|mov)(\?|$)/i.test(value) || value.includes('firebasestorage') && /video/.test(value) ? (
+          {/\.(mp4|webm|mov)(\?|$)/i.test(value) ? (
             <video src={value} className="w-full h-32 object-cover" muted loop autoPlay playsInline />
           ) : (
-            <img src={value} alt="preview" className="w-full h-32 object-cover"
-              onError={e => (e.currentTarget.parentElement!.style.display = 'none')} />
+            <img src={value} alt="preview" className="w-full h-32 object-cover" />
           )}
-          <button
-            type="button"
-            onClick={() => onChange('', 'image')}
-            className="absolute top-2 right-2 w-6 h-6 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-          >
+          <button type="button" onClick={() => onChange('', 'image')}
+            className="absolute top-2 right-2 w-6 h-6 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <X className="w-3.5 h-3.5 text-white" />
           </button>
         </div>

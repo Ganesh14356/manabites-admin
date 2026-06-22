@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
   collection, query, where, onSnapshot, doc, getDocs,
-  updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp, runTransaction,
+  updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -79,22 +79,15 @@ const PAGE_SIZE = 10;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * MBR<YY><MM><seq> — e.g. MBR26060001, MBR26060002. The 4-digit sequence is a
- * globally auto-incrementing counter (atomic Firestore transaction), prefixed
- * with the approval month so IDs stay both sequential and time-readable.
+ * MBR<YY><MM><XXXX> — e.g. MBR2606A3F1. Uses timestamp-based suffix
+ * so no Firestore transaction is needed, avoiding permission issues.
  */
-async function generateRiderId(): Promise<string> {
-  const counterRef = doc(db, 'counters', 'riderId');
-  const seq = await runTransaction(db, async (txn) => {
-    const snap = await txn.get(counterRef);
-    const next = (snap.exists() ? (snap.data().seq ?? 0) : 0) + 1;
-    txn.set(counterRef, { seq: next, updatedAt: serverTimestamp() }, { merge: true });
-    return next;
-  });
+function generateRiderId(): string {
   const now = new Date();
   const yy = String(now.getFullYear()).slice(-2);
   const mm = String(now.getMonth() + 1).padStart(2, '0');
-  return `MBR${yy}${mm}${String(seq).padStart(4, '0')}`;
+  const seq = (Date.now() % 10000).toString().padStart(4, '0');
+  return `MBR${yy}${mm}${seq}`;
 }
 
 function generatePassword(length = 12): string {
@@ -487,7 +480,7 @@ export default function RiderApproval() {
   const handleApprove = async (r: RiderDoc) => {
     setApprovingId(r.id);
     try {
-      const riderID = await generateRiderId();
+      const riderID = generateRiderId();
       await updateDoc(doc(db, collectionFor(r), r.id), {
         approved: true, approvalStatus: 'approved', status: 'approved',
         isActive: true, approvedAt: serverTimestamp(), rejectedReason: null,

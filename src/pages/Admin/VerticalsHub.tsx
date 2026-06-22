@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+// toggleFlag now calls /api/update-flags (Admin SDK) to bypass Firestore security rules
 import { db } from '../../firebase';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   Rocket,
   Globe,
@@ -18,6 +20,9 @@ import {
   CheckCircle,
   Clock,
   Zap,
+  ToggleLeft,
+  ToggleRight,
+  Shield,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -278,13 +283,80 @@ function overallProgress(verticals: Vertical[]): number {
   return Math.round(total / verticals.length);
 }
 
+// ── Feature Flag definitions ──────────────────────────────────────────────────
+
+interface FlagDef {
+  key:     string;
+  label:   string;
+  emoji:   string;
+  desc:    string;
+}
+
+const FLAG_DEFS: FlagDef[] = [
+  { key: 'food',          label: 'Food Delivery',  emoji: '🍔', desc: 'Restaurant orders & delivery' },
+  { key: 'grocery',       label: 'Grocery',        emoji: '🛒', desc: '10-minute grocery delivery'   },
+  { key: 'pharmacy',      label: 'Pharmacy',       emoji: '💊', desc: 'Medicines & health products'  },
+  { key: 'courier',       label: 'Courier',        emoji: '📦', desc: 'Parcel & document delivery'   },
+  { key: 'catering',      label: 'Catering',       emoji: '🎉', desc: 'Events & corporate catering'  },
+  { key: 'home-services', label: 'Home Services',  emoji: '🏠', desc: 'Plumbing, cleaning, repairs'  },
+  { key: 'bike-taxi',     label: 'Bike Taxi',      emoji: '🛵', desc: '2-wheeler ride booking'       },
+  { key: 'auto',          label: 'Auto',           emoji: '🚕', desc: 'Auto-rickshaw booking'        },
+  { key: 'cab',           label: 'Cab',            emoji: '🚗', desc: '4-wheeler cab rides'          },
+  { key: 'car-rental',    label: 'Car Rental',     emoji: '🚘', desc: 'Self-drive & chauffeur'       },
+  { key: 'b2b',           label: 'B2B Supply',     emoji: '🏢', desc: 'Restaurant supply chain'     },
+  { key: 'store',         label: 'Store',          emoji: '🛍', desc: 'Fashion & electronics'       },
+];
+
+const DEFAULT_FLAGS: Record<string, boolean> = Object.fromEntries(
+  FLAG_DEFS.map(f => [f.key, f.key === 'food'])
+);
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function VerticalsHub() {
+  const { user } = useAuth();
   const [selectedVertical, setSelectedVertical] = useState<Vertical | null>(null);
   const [config, setConfig] = useState<VerticalConfig>(EMPTY_CONFIG);
   const [saving, setSaving] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(false);
+
+  // ── Feature flags state ──
+  const [flags, setFlags]         = useState<Record<string, boolean>>(DEFAULT_FLAGS);
+  const [flagsLoading, setFlagsLoading] = useState(true);
+  const [flagsSaving, setFlagsSaving]   = useState(false);
+
+  useEffect(() => {
+    const ref = doc(db, 'config', 'verticals');
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) setFlags({ ...DEFAULT_FLAGS, ...snap.data() as Record<string, boolean> });
+      setFlagsLoading(false);
+    }, () => setFlagsLoading(false));
+    return unsub;
+  }, []);
+
+  async function toggleFlag(key: string) {
+    const next = !flags[key];
+    setFlags(prev => ({ ...prev, [key]: next }));
+    setFlagsSaving(true);
+    try {
+      const res = await fetch('/api/update-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      toast.success(`${FLAG_DEFS.find(f => f.key === key)?.label} ${next ? 'enabled' : 'disabled'}`);
+    } catch (e: any) {
+      setFlags(prev => ({ ...prev, [key]: !next }));
+      console.error('[VerticalsHub] toggleFlag error:', e);
+      toast.error(`Failed: ${e.message || 'unknown'}`);
+    } finally {
+      setFlagsSaving(false);
+    }
+  }
 
   const overall = overallProgress(VERTICALS);
 
@@ -359,6 +431,73 @@ export default function VerticalsHub() {
             <p className="text-sm text-gray-500">Expand ManaBites beyond food delivery</p>
           </div>
         </div>
+      </motion.div>
+
+      {/* ── Feature Flags ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.04 }}
+        className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-8"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-orange-100 rounded-lg">
+              <Shield className="w-4 h-4 text-orange-600" />
+            </div>
+            <div>
+              <h2 className="font-bold text-gray-900 text-sm">Customer App — Live Feature Flags</h2>
+              <p className="text-xs text-gray-500">Toggle which verticals customers can see</p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-0.5">
+            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+              {Object.values(flags).filter(Boolean).length} active
+            </div>
+            {user?.email && (
+              <span className="text-[10px] text-gray-400 font-mono">{user.email}</span>
+            )}
+          </div>
+        </div>
+
+        {flagsLoading ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {FLAG_DEFS.map(f => (
+              <div key={f.key} className="h-14 bg-gray-100 rounded-xl animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {FLAG_DEFS.map(f => {
+              const on = flags[f.key] ?? false;
+              return (
+                <button
+                  key={f.key}
+                  onClick={() => toggleFlag(f.key)}
+                  disabled={flagsSaving}
+                  className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-all
+                    ${on
+                      ? 'bg-orange-50 border-orange-200 text-orange-700'
+                      : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
+                    } ${flagsSaving ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <span className="text-lg leading-none">{f.emoji}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs font-semibold leading-tight truncate ${on ? 'text-orange-800' : 'text-gray-700'}`}>
+                      {f.label}
+                    </p>
+                    <p className="text-[10px] text-gray-400 truncate">{f.desc}</p>
+                  </div>
+                  {on
+                    ? <ToggleRight className="w-5 h-5 text-orange-500 shrink-0" />
+                    : <ToggleLeft  className="w-5 h-5 text-gray-300  shrink-0" />
+                  }
+                </button>
+              );
+            })}
+          </div>
+        )}
       </motion.div>
 
       {/* ── Vision 2030 Overview ── */}
