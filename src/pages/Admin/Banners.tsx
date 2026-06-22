@@ -95,33 +95,80 @@ function MediaUploader({
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const upload = useCallback((file: File) => {
-    const isVideo = file.type.startsWith('video/');
-    const isImage = file.type.startsWith('image/');
-    if (!isVideo && !isImage) { toast.error('Only images and videos allowed'); return; }
-    if (file.size > 50 * 1024 * 1024) { toast.error('Max file size: 50 MB'); return; }
+  const compressImage = (file: File): Promise<Blob> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        const MAX = 1200;
+        let { width, height } = img;
+        if (width > MAX) { height = Math.round(height * MAX / width); width = MAX; }
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(blob => resolve(blob ?? file), 'image/jpeg', 0.82);
+      };
+      img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+      img.src = objectUrl;
+    });
 
-    const ext  = file.name.split('.').pop();
+  const [uploadSpeed, setUploadSpeed] = useState('');
+  const speedRef = useRef<{ bytes: number; time: number } | null>(null);
+
+  const doUpload = useCallback((blob: Blob, mimeType: string, ext: string, isVideo: boolean) => {
     const path = `banners/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
     const sRef = storageRef(storage, path);
-    const task = uploadBytesResumable(sRef, file, { contentType: file.type });
+    const task = uploadBytesResumable(sRef, blob, { contentType: mimeType });
+    speedRef.current = { bytes: 0, time: Date.now() };
 
     setProgress(0);
     task.on(
       'state_changed',
-      snap => setProgress(Math.round(snap.bytesTransferred / snap.totalBytes * 100)),
-      () => { toast.error('Upload failed'); setProgress(null); },
+      snap => {
+        const pct = Math.round(snap.bytesTransferred / snap.totalBytes * 100);
+        setProgress(pct);
+        const now = Date.now();
+        const elapsed = (now - speedRef.current!.time) / 1000;
+        const bytesDelta = snap.bytesTransferred - speedRef.current!.bytes;
+        if (elapsed > 0.5) {
+          const kbps = bytesDelta / elapsed / 1024;
+          setUploadSpeed(kbps > 1024 ? `${(kbps / 1024).toFixed(1)} MB/s` : `${Math.round(kbps)} KB/s`);
+          speedRef.current = { bytes: snap.bytesTransferred, time: now };
+        }
+      },
+      () => { toast.error('Upload failed — check Firebase Storage rules'); setProgress(null); setUploadSpeed(''); },
       async () => {
         const url = await getDownloadURL(task.snapshot.ref);
         onChange(url, isVideo ? 'video' : 'image');
-        setProgress(null);
+        setProgress(null); setUploadSpeed('');
         toast.success('Uploaded!');
       },
     );
   }, [onChange]);
 
+  const upload = useCallback(async (file: File) => {
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    if (!isVideo && !isImage) { toast.error('Only images and videos allowed'); return; }
+    if (file.size > 50 * 1024 * 1024) { toast.error('Max file size: 50 MB'); return; }
+
+    const ext = file.name.split('.').pop() ?? (isVideo ? 'mp4' : 'jpg');
+
+    if (isImage && !file.type.includes('gif')) {
+      setProgress(0);
+      const before = (file.size / 1024).toFixed(0);
+      const blob = await compressImage(file);
+      const after = (blob.size / 1024).toFixed(0);
+      toast(`Compressed ${before}KB → ${after}KB`, { icon: '⚡' });
+      doUpload(blob, 'image/jpeg', 'jpg', false);
+    } else {
+      doUpload(file, file.type, ext, isVideo);
+    }
+  }, [doUpload]);
+
   const handleFiles = (files: FileList | null) => {
-    if (files?.[0]) upload(files[0]);
+    if (files?.[0]) upload(files[0]).catch(() => {});
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -169,10 +216,18 @@ function MediaUploader({
           />
           {progress !== null ? (
             <div className="space-y-2">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div className="bg-brand h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
+              <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                <motion.div
+                  className="bg-brand h-2.5 rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${progress}%` }}
+                  transition={{ ease: 'linear', duration: 0.3 }}
+                />
               </div>
-              <p className="text-sm font-bold text-brand">Uploading... {progress}%</p>
+              <div className="flex justify-between items-center">
+                <p className="text-sm font-bold text-brand">Uploading... {progress}%</p>
+                {uploadSpeed && <p className="text-xs text-gray-400 font-semibold">{uploadSpeed}</p>}
+              </div>
             </div>
           ) : (
             <>
