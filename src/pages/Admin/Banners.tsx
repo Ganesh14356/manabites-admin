@@ -647,12 +647,17 @@ export default function Banners() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Offer Title *</label>
-                  <input {...register('title', { required: true })} placeholder="50% OFF up to ₹100" className={`input-field ${errors.title ? 'border-red-400' : ''}`} />
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    Offer Title {!mediaUrl && <span className="text-red-400">*</span>}
+                    {mediaUrl && <span className="text-gray-400 font-normal normal-case">(optional — image lo show avvadhu)</span>}
+                  </label>
+                  <input {...register('title', { required: !mediaUrl })} placeholder="50% OFF up to ₹100" className={`input-field ${errors.title ? 'border-red-400' : ''}`} />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Subtitle *</label>
-                  <input {...register('subtitle', { required: true })} placeholder="First order special" className={`input-field ${errors.subtitle ? 'border-red-400' : ''}`} />
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                    Subtitle {!mediaUrl && <span className="text-red-400">*</span>}
+                  </label>
+                  <input {...register('subtitle', { required: !mediaUrl })} placeholder="First order special" className={`input-field ${errors.subtitle ? 'border-red-400' : ''}`} />
                 </div>
 
                 {/* Media upload */}
