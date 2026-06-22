@@ -6,10 +6,6 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-
-const CLOUDINARY_CLOUD  = 'dfgpn29zt';
-const CLOUDINARY_PRESET = 'manabites_banners';
-
 import {
   Plus, Edit2, Trash2, ToggleLeft, ToggleRight, X, GripVertical,
   BarChart2, Clock, Calendar, MousePointer, ShoppingBag, Upload, ImageIcon, VideoIcon, Link2,
@@ -23,6 +19,9 @@ import {
   arrayMove, SortableContext, useSortable, verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+
+const CLOUDINARY_CLOUD  = 'dfgpn29zt';
+const CLOUDINARY_PRESET = 'manabites_banners';
 
 interface Banner {
   id: string;
