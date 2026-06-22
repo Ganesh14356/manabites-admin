@@ -208,19 +208,22 @@ function MediaUploader({
           >
             <motion.div
               initial={{ scale: 0.92 }} animate={{ scale: 1 }} exit={{ scale: 0.92 }}
-              className="bg-white rounded-2xl overflow-hidden shadow-2xl max-w-lg w-full"
+              className="bg-white rounded-2xl overflow-hidden shadow-2xl max-w-lg w-full flex flex-col"
+              style={{ maxHeight: '90vh' }}
             >
-              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
                 <div>
                   <p className="font-black text-gray-900">Crop Banner Image</p>
-                  <p className="text-xs text-gray-400 mt-0.5">2:1 ratio · drag to adjust</p>
+                  <p className="text-xs text-gray-400">2:1 ratio · drag to adjust</p>
                 </div>
                 <button type="button" onClick={() => setCropSrc(null)}
                   className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-4 bg-gray-50">
+              {/* Crop area */}
+              <div className="p-4 bg-gray-50 overflow-auto flex-1 flex items-center justify-center">
                 <ReactCrop
                   crop={crop} onChange={c => setCrop(c)}
                   aspect={BANNER_ASPECT} minWidth={80}
@@ -228,17 +231,18 @@ function MediaUploader({
                   <img
                     ref={imgRef} src={cropSrc} alt="crop"
                     onLoad={onImageLoad}
-                    className="max-h-[55vh] w-full object-contain"
+                    style={{ maxHeight: '45vh', maxWidth: '100%', objectFit: 'contain' }}
                   />
                 </ReactCrop>
               </div>
-              <div className="flex gap-3 px-5 py-4">
+              {/* Buttons — always pinned at bottom */}
+              <div className="flex gap-3 px-5 py-4 border-t border-gray-100 flex-shrink-0 bg-white">
                 <button type="button" onClick={() => setCropSrc(null)}
-                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600 hover:bg-gray-50">
+                  className="flex-1 py-3 rounded-xl border border-gray-200 text-sm font-bold text-gray-600">
                   Cancel
                 </button>
                 <button type="button" onClick={confirmCrop}
-                  className="flex-1 py-2.5 rounded-xl bg-brand text-white text-sm font-bold shadow">
+                  className="flex-1 py-3 rounded-xl bg-brand text-white text-sm font-black shadow-lg">
                   ✂️ Crop & Upload
                 </button>
               </div>
