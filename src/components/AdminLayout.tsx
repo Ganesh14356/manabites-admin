@@ -6,7 +6,7 @@ import {
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
   Headphones, Receipt, Gavel, ClipboardList, Radar, Banknote, Activity,
-  ShoppingCart, Package, Warehouse,
+  ShoppingCart, Package, Warehouse, UtensilsCrossed,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { auth, db } from '../firebase';
@@ -52,6 +52,7 @@ const BASE_NAV = [
   { name: 'Razorpay',            path: '/admin/razorpay',             icon: CreditCard },
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
+  { name: 'Food Categories',      path: '/admin/food-categories',      icon: UtensilsCrossed },
   { name: 'Fraud Detection',     path: '/admin/fraud',                icon: ShieldAlert },
   { name: 'Blacklist',           path: '/admin/blacklist',            icon: Ban        },
   { name: 'Rider Incentives',      path: '/admin/rider-incentives',     icon: Gift       },
