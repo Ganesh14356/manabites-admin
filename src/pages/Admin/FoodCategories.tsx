@@ -71,14 +71,40 @@ export default function FoodCategories() {
     setSeeding(true);
     try {
       const col = collection(db, 'foodCategories');
-      // Delete all existing first to avoid duplicates
       const existing = await getDocs(col);
       for (const d of existing.docs) await deleteDoc(d.ref);
-      // Add defaults fresh
       for (const cat of DEFAULT_CATEGORIES) await addDoc(col, cat);
       toast.success('Default categories loaded!');
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load defaults');
+    }
+    finally { setSeeding(false); }
+  };
+
+  const removeDuplicates = async () => {
+    setSeeding(true);
+    try {
+      const snap = await getDocs(collection(db, 'foodCategories'));
+      const seen = new Map<string, string>(); // name → docId to KEEP
+      const toDelete: string[] = [];
+      // Keep the doc with imageUrl if available; otherwise keep first
+      snap.docs.forEach(d => {
+        const name = (d.data().name || '').trim().toLowerCase();
+        const hasImage = !!(d.data().imageUrl);
+        if (!seen.has(name)) {
+          seen.set(name, d.id);
+        } else if (hasImage) {
+          // This one has an image — swap: keep this, delete the one we stored before
+          toDelete.push(seen.get(name)!);
+          seen.set(name, d.id);
+        } else {
+          toDelete.push(d.id);
+        }
+      });
+      for (const id of toDelete) await deleteDoc(doc(db, 'foodCategories', id));
+      toast.success(`Removed ${toDelete.length} duplicate(s)`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed');
     }
     finally { setSeeding(false); }
   };
@@ -130,14 +156,23 @@ export default function FoodCategories() {
             These appear as category chips on the ManaBites home screen. If none are added, default categories are shown.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          {cats.length > 10 && (
+            <button
+              onClick={removeDuplicates}
+              disabled={seeding}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 transition disabled:opacity-50"
+            >
+              🧹 Remove Duplicates ({cats.length - 10} extra)
+            </button>
+          )}
           <button
             onClick={loadDefaults}
             disabled={seeding}
             className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition disabled:opacity-50"
           >
             <RefreshCw size={14} className={seeding ? 'animate-spin' : ''} />
-            {seeding ? 'Loading…' : 'Load Defaults'}
+            {seeding ? 'Working…' : 'Reset to Defaults'}
           </button>
           <button
             onClick={openAdd}

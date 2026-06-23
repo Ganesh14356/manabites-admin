@@ -42,8 +42,19 @@ export default function TrendingItems() {
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, 'trendingItems'), orderBy('order')),
-      snap => { setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as TrendingItem))); setLoading(false); },
-      err  => { console.error(err); setLoading(false); }
+      async snap => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as TrendingItem));
+        setItems(docs);
+        // Auto-seed defaults on first load if empty
+        if (docs.length === 0 && !loading) {
+          try {
+            const col = collection(db, 'trendingItems');
+            for (const item of DEFAULTS) await addDoc(col, item);
+          } catch { /* silent */ }
+        }
+        setLoading(false);
+      },
+      err => { console.error(err); setLoading(false); }
     );
     return unsub;
   }, []);

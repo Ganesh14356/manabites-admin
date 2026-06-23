@@ -40,8 +40,19 @@ export default function LunchSpecials() {
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, 'lunchSpecials'), orderBy('order')),
-      snap => { setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem))); setLoading(false); },
-      err  => { console.error(err); setLoading(false); }
+      async snap => {
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem));
+        setItems(docs);
+        // Auto-seed defaults on first load if empty
+        if (docs.length === 0 && !loading) {
+          try {
+            const col = collection(db, 'lunchSpecials');
+            for (const item of DEFAULTS) await addDoc(col, item);
+          } catch { /* silent */ }
+        }
+        setLoading(false);
+      },
+      err => { console.error(err); setLoading(false); }
     );
     return unsub;
   }, []);
