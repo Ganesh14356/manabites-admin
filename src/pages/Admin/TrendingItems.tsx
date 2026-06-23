@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, deleteDoc, doc, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Plus, Edit2, Trash2, X, Image, TrendingUp } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -78,10 +78,13 @@ export default function TrendingItems() {
   };
 
   const loadDefaults = async () => {
-    if (!window.confirm('Load 8 default trending items? Existing items will NOT be deleted.')) return;
+    if (!window.confirm('This will DELETE all existing trending items and load 8 defaults. Continue?')) return;
     setSeeding(true);
     try {
-      for (const item of DEFAULTS) await addDoc(collection(db, 'trendingItems'), item);
+      const col = collection(db, 'trendingItems');
+      const existing = await getDocs(col);
+      for (const d of existing.docs) await deleteDoc(d.ref);
+      for (const item of DEFAULTS) await addDoc(col, item);
       toast.success('Defaults loaded!');
     } catch (e: any) { toast.error(e?.message || 'Failed'); }
     finally { setSeeding(false); }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc, writeBatch,
+  addDoc, updateDoc, deleteDoc, doc, getDocs,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Plus, Edit2, Trash2, X, GripVertical, Image, RefreshCw } from 'lucide-react';
@@ -67,17 +67,17 @@ export default function FoodCategories() {
   }, []);
 
   const loadDefaults = async () => {
-    if (!window.confirm('Load 10 default categories (Biryani, Pizza, Burger…)? Existing categories will NOT be deleted.')) return;
+    if (!window.confirm('This will DELETE all existing categories and load 10 defaults. Continue?')) return;
     setSeeding(true);
     try {
       const col = collection(db, 'foodCategories');
-      console.log('DB app:', db.app.name, 'DB id:', (db as any)._databaseId?.database);
-      for (const cat of DEFAULT_CATEGORIES) {
-        await addDoc(col, cat);
-      }
+      // Delete all existing first to avoid duplicates
+      const existing = await getDocs(col);
+      for (const d of existing.docs) await deleteDoc(d.ref);
+      // Add defaults fresh
+      for (const cat of DEFAULT_CATEGORIES) await addDoc(col, cat);
       toast.success('Default categories loaded!');
     } catch (e: any) {
-      console.error('loadDefaults error:', e?.code, e?.message, e);
       toast.error(e?.message || 'Failed to load defaults');
     }
     finally { setSeeding(false); }
