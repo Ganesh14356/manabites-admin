@@ -2,11 +2,24 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc,
+  addDoc, updateDoc, deleteDoc, doc, writeBatch,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Plus, Edit2, Trash2, X, GripVertical, Image } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, GripVertical, Image, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+const DEFAULT_CATEGORIES = [
+  { name: 'Biryani',      emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',      bgColor: 'bg-amber-50',  order: 0 },
+  { name: 'Pizza',        emoji: '🍕', imageUrl: '', searchTerm: 'Pizza',        bgColor: 'bg-red-50',    order: 1 },
+  { name: 'Burger',       emoji: '🍔', imageUrl: '', searchTerm: 'Burger',       bgColor: 'bg-yellow-50', order: 2 },
+  { name: 'Chinese',      emoji: '🥡', imageUrl: '', searchTerm: 'Chinese',      bgColor: 'bg-orange-50', order: 3 },
+  { name: 'South Indian', emoji: '🥘', imageUrl: '', searchTerm: 'South Indian', bgColor: 'bg-green-50',  order: 4 },
+  { name: 'Desserts',     emoji: '🍰', imageUrl: '', searchTerm: 'Desserts',     bgColor: 'bg-pink-50',   order: 5 },
+  { name: 'North Indian', emoji: '🍲', imageUrl: '', searchTerm: 'North Indian', bgColor: 'bg-orange-50', order: 6 },
+  { name: 'Healthy',      emoji: '🥗', imageUrl: '', searchTerm: 'Healthy',      bgColor: 'bg-lime-50',   order: 7 },
+  { name: 'Fast Food',    emoji: '🌮', imageUrl: '', searchTerm: 'Fast Food',    bgColor: 'bg-yellow-50', order: 8 },
+  { name: 'Beverages',    emoji: '☕', imageUrl: '', searchTerm: 'Beverages',    bgColor: 'bg-stone-50',  order: 9 },
+];
 
 interface FoodCategory {
   id: string;
@@ -34,11 +47,12 @@ const BG_OPTIONS = [
 ];
 
 export default function FoodCategories() {
-  const [cats, setCats]       = useState<FoodCategory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm]       = useState<Omit<FoodCategory, 'id'> | null>(null);
-  const [editId, setEditId]   = useState<string | null>(null);
-  const [saving, setSaving]   = useState(false);
+  const [cats, setCats]         = useState<FoodCategory[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [form, setForm]         = useState<Omit<FoodCategory, 'id'> | null>(null);
+  const [editId, setEditId]     = useState<string | null>(null);
+  const [saving, setSaving]     = useState(false);
+  const [seeding, setSeeding]   = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -51,6 +65,20 @@ export default function FoodCategories() {
     );
     return unsub;
   }, []);
+
+  const loadDefaults = async () => {
+    if (!window.confirm('Load 10 default categories (Biryani, Pizza, Burger…)? Existing categories will NOT be deleted.')) return;
+    setSeeding(true);
+    try {
+      const batch = writeBatch(db);
+      DEFAULT_CATEGORIES.forEach(cat => {
+        batch.set(doc(collection(db, 'foodCategories')), cat);
+      });
+      await batch.commit();
+      toast.success('Default categories loaded!');
+    } catch { toast.error('Failed to load defaults'); }
+    finally { setSeeding(false); }
+  };
 
   const openAdd = () => { setForm({ ...EMPTY, order: cats.length }); setEditId(null); };
   const openEdit = (c: FoodCategory) => {
@@ -99,12 +127,22 @@ export default function FoodCategories() {
             These appear as category chips on the ManaBites home screen. If none are added, default categories are shown.
           </p>
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90 transition"
-        >
-          <Plus size={16} /> Add Category
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={loadDefaults}
+            disabled={seeding}
+            className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={seeding ? 'animate-spin' : ''} />
+            {seeding ? 'Loading…' : 'Load Defaults'}
+          </button>
+          <button
+            onClick={openAdd}
+            className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90 transition"
+          >
+            <Plus size={16} /> Add Category
+          </button>
+        </div>
       </div>
 
       {/* Preview note */}
