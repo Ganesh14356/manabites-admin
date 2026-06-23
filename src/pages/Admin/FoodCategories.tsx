@@ -70,13 +70,16 @@ export default function FoodCategories() {
     if (!window.confirm('Load 10 default categories (Biryani, Pizza, Burger…)? Existing categories will NOT be deleted.')) return;
     setSeeding(true);
     try {
-      const batch = writeBatch(db);
-      DEFAULT_CATEGORIES.forEach(cat => {
-        batch.set(doc(collection(db, 'foodCategories')), cat);
-      });
-      await batch.commit();
+      const col = collection(db, 'foodCategories');
+      console.log('DB app:', db.app.name, 'DB id:', (db as any)._databaseId?.database);
+      for (const cat of DEFAULT_CATEGORIES) {
+        await addDoc(col, cat);
+      }
       toast.success('Default categories loaded!');
-    } catch (e: any) { console.error('loadDefaults error:', e); toast.error(e?.message || 'Failed to load defaults'); }
+    } catch (e: any) {
+      console.error('loadDefaults error:', e?.code, e?.message, e);
+      toast.error(e?.message || 'Failed to load defaults');
+    }
     finally { setSeeding(false); }
   };
 
