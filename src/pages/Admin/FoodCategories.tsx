@@ -187,8 +187,39 @@ export default function FoodCategories() {
     catch (e: any) { toast.error(e?.message || 'Failed'); }
   };
 
+  // Remove duplicates — keep 1 item per name (prefer item with imageUrl), preserve images
+  const dedupLunch = async () => {
+    if (!window.confirm('Remove duplicate items? Your images will be kept.')) return;
+    try {
+      const col = collection(db, 'lunchSpecials');
+      const snap = await getDocs(col);
+      const all = snap.docs.map(d => ({ ref: d.ref, ...(d.data() as any) }));
+      // Group by name
+      const groups: Record<string, typeof all> = {};
+      for (const item of all) {
+        const key = (item.name || '').toLowerCase().trim();
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+      }
+      // Keep best (has imageUrl), delete rest; also patch imageUrl if missing
+      for (const group of Object.values(groups)) {
+        if (group.length <= 1) continue;
+        const best = group.find(i => i.imageUrl) || group[0];
+        for (const item of group) {
+          if (item.ref.id !== best.ref.id) await deleteDoc(item.ref);
+        }
+        // If kept item had no image but another had one, update it
+        if (!best.imageUrl) {
+          const withImg = group.find(i => i.imageUrl);
+          if (withImg) await updateDoc(best.ref, { imageUrl: withImg.imageUrl });
+        }
+      }
+      toast.success('Duplicates removed! Images preserved.');
+    } catch (e: any) { toast.error(e?.message || 'Failed'); }
+  };
+
   const resetLunch = async () => {
-    if (!window.confirm('Delete all Lunch Specials and reload 16 time-based defaults?')) return;
+    if (!window.confirm('Delete ALL Lunch Specials and reload 16 defaults? Images will be lost!')) return;
     try {
       const col = collection(db, 'lunchSpecials');
       const snap = await getDocs(col);
@@ -263,9 +294,9 @@ export default function FoodCategories() {
           <p className="text-sm font-bold text-red-600 dark:text-red-400">
             ⚠️ {lunch.length} items found (expected 16) — duplicates detected!
           </p>
-          <button onClick={resetLunch}
+          <button onClick={dedupLunch}
             className="flex-shrink-0 px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition">
-            🔄 Fix Now
+            🧹 Remove Duplicates
           </button>
         </div>
       )}
