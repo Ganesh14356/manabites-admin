@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc, getDocs,
+  addDoc, updateDoc, deleteDoc, doc, getDocs, setDoc, getDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Plus, Edit2, Trash2, X, Image } from 'lucide-react';
@@ -87,7 +87,25 @@ export default function FoodCategories() {
   const [modal, setModal]     = useState(false);
   const [editId, setEditId]   = useState<string | null>(null);
   const [form, setForm]       = useState<any>(EMPTY_CAT);
-  const [saving, setSaving]   = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const [timeFilter, setTimeFilter] = useState(true);
+
+  // Load time-filter setting
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'config', 'lunchSettings'), snap => {
+      if (snap.exists()) setTimeFilter(snap.data().timeFilterEnabled !== false);
+    });
+    return unsub;
+  }, []);
+
+  const toggleTimeFilter = async () => {
+    const next = !timeFilter;
+    setTimeFilter(next);
+    try {
+      await setDoc(doc(db, 'config', 'lunchSettings'), { timeFilterEnabled: next }, { merge: true });
+      toast.success(next ? '⏰ Time filter ON' : '🔓 Time filter OFF — all items visible');
+    } catch { toast.error('Failed to save setting'); setTimeFilter(!next); }
+  };
 
   // Subscribe all 3 collections; auto-seed lunch+trending if empty
   useEffect(() => {
@@ -189,10 +207,24 @@ export default function FoodCategories() {
         <h1 className="text-2xl font-black text-gray-900 dark:text-white">Home Screen Sections</h1>
         <div className="flex gap-2">
           {tab === 'lunchSpecials' && (
-            <button onClick={resetLunch}
-              className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition">
-              🔄 Reset Defaults
-            </button>
+            <>
+              {/* Time filter toggle */}
+              <button onClick={toggleTimeFilter}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl font-bold text-sm transition border ${
+                  timeFilter
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-orange-50 border-orange-200 text-orange-700'
+                }`}>
+                <span className={`w-8 h-4 rounded-full relative transition-colors ${timeFilter ? 'bg-green-400' : 'bg-gray-300'}`}>
+                  <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${timeFilter ? 'left-4' : 'left-0.5'}`} />
+                </span>
+                {timeFilter ? '⏰ Time ON' : '🔓 Time OFF'}
+              </button>
+              <button onClick={resetLunch}
+                className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition">
+                🔄 Reset
+              </button>
+            </>
           )}
           <button onClick={openAdd}
             className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90">
