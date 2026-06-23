@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc,
+  addDoc, updateDoc, deleteDoc, doc, getDocs,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Plus, Edit2, Trash2, X, Image } from 'lucide-react';
@@ -169,17 +169,36 @@ export default function FoodCategories() {
     catch (e: any) { toast.error(e?.message || 'Failed'); }
   };
 
+  const resetLunch = async () => {
+    if (!window.confirm('Delete all Lunch Specials and reload 16 time-based defaults?')) return;
+    try {
+      const col = collection(db, 'lunchSpecials');
+      const snap = await getDocs(col);
+      for (const d of snap.docs) await deleteDoc(d.ref);
+      for (const item of DEFAULT_LUNCH) await addDoc(col, item);
+      toast.success('Lunch Specials reset!');
+    } catch (e: any) { toast.error(e?.message || 'Failed'); }
+  };
+
   const F = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-black text-gray-900 dark:text-white">Home Screen Sections</h1>
-        <button onClick={openAdd}
-          className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90">
-          <Plus size={16} /> Add Item
-        </button>
+        <div className="flex gap-2">
+          {tab === 'lunchSpecials' && (
+            <button onClick={resetLunch}
+              className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-xl font-bold text-sm hover:bg-gray-200 transition">
+              🔄 Reset Defaults
+            </button>
+          )}
+          <button onClick={openAdd}
+            className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90">
+            <Plus size={16} /> Add Item
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -218,6 +237,53 @@ export default function FoodCategories() {
           <button onClick={openAdd} className="mt-4 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm">
             Add First Item
           </button>
+        </div>
+      ) : tab === 'lunchSpecials' ? (
+        // Grouped by time slot
+        <div className="space-y-5">
+          {[
+            { slot: 'breakfast', label: '🌅 Breakfast', sub: '6am – 11am' },
+            { slot: 'lunch',     label: '🍱 Lunch',     sub: '11am – 4pm' },
+            { slot: 'evening',   label: '☕ Evening',   sub: '4pm – 8pm'  },
+            { slot: 'dinner',    label: '🌙 Dinner',    sub: '8pm – 12am' },
+          ].map(({ slot, label, sub }) => {
+            const slotItems = (lunch as any[]).filter(i => i.timeSlot === slot);
+            return (
+              <div key={slot}>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="font-black text-gray-700 dark:text-gray-200 text-sm">{label}</p>
+                  <span className="text-xs text-gray-400">{sub}</span>
+                  <span className="text-xs font-bold bg-gray-100 dark:bg-gray-800 text-gray-500 px-2 py-0.5 rounded-full">{slotItems.length} items</span>
+                </div>
+                {slotItems.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-2">No items — click "Add Item" and select {label.split(' ')[1]}</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {slotItems.map((item: any) => (
+                      <motion.div key={item.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                        className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-3 flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                          {item.imageUrl
+                            ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"
+                                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                            : <span className="text-2xl">{item.emoji}</span>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-gray-900 dark:text-white text-sm truncate">{item.name}</p>
+                          <p className="text-xs text-gray-400 truncate">{item.subtitle}</p>
+                          {item.imageUrl && <p className="text-[10px] text-blue-500 flex items-center gap-1 mt-0.5"><Image size={9} /> Image set</p>}
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button onClick={() => openEdit(item)} className="p-2 text-gray-400 hover:text-brand rounded-xl"><Edit2 size={14} /></button>
+                          <button onClick={() => del(item.id, item.name)} className="p-2 text-gray-400 hover:text-red-500 rounded-xl"><Trash2 size={14} /></button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
