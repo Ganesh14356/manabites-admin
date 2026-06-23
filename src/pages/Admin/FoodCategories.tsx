@@ -102,9 +102,14 @@ export default function FoodCategories() {
       async s => {
         const docs = s.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem));
         setLunch(docs);
-        if (docs.length === 0) {
-          try { for (const item of DEFAULT_LUNCH) await addDoc(collection(db, 'lunchSpecials'), item); }
-          catch { /* silent */ }
+        // Seed if empty OR if old items exist without timeSlot (migration)
+        const hasOldItems = docs.length > 0 && docs.every(d => !(d as any).timeSlot);
+        if (docs.length === 0 || hasOldItems) {
+          try {
+            const col = collection(db, 'lunchSpecials');
+            for (const d of s.docs) await deleteDoc(d.ref); // clear old
+            for (const item of DEFAULT_LUNCH) await addDoc(col, item);
+          } catch { /* silent */ }
         }
         done();
       },
