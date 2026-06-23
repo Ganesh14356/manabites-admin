@@ -44,6 +44,25 @@ const EMPTY_CAT   = { name: '', emoji: '🍛', imageUrl: '', searchTerm: '', bgC
 const EMPTY_LUNCH = { name: '', emoji: '🍱', imageUrl: '', searchTerm: '', subtitle: "Today's Special", order: 0 };
 const EMPTY_TREND = { name: '', emoji: '🍽️', imageUrl: '', searchTerm: '', count: 0, order: 0 };
 
+const DEFAULT_LUNCH = [
+  { name: 'Chicken Biryani', emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',    subtitle: 'Afternoon Special', order: 0 },
+  { name: 'Veg Thali',       emoji: '🍽️', imageUrl: '', searchTerm: 'Thali',      subtitle: 'Homestyle Comfort', order: 1 },
+  { name: 'Dal Fry',         emoji: '🫕', imageUrl: '', searchTerm: 'Dal',         subtitle: 'Light & Healthy',   order: 2 },
+  { name: 'Roti Combo',      emoji: '🫓', imageUrl: '', searchTerm: 'Roti',        subtitle: 'Value Meal',        order: 3 },
+  { name: 'Fried Rice',      emoji: '🍚', imageUrl: '', searchTerm: 'Fried Rice',  subtitle: 'Quick Lunch',       order: 4 },
+  { name: 'Paneer Curry',    emoji: '🧀', imageUrl: '', searchTerm: 'Paneer',      subtitle: 'Veg Delight',       order: 5 },
+];
+const DEFAULT_TREND = [
+  { name: 'Chicken Biryani', emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',    count: 120, order: 0 },
+  { name: 'Pizza',           emoji: '🍕', imageUrl: '', searchTerm: 'Pizza',       count: 98,  order: 1 },
+  { name: 'Burger',          emoji: '🍔', imageUrl: '', searchTerm: 'Burger',      count: 87,  order: 2 },
+  { name: 'Dosa',            emoji: '🥞', imageUrl: '', searchTerm: 'Dosa',        count: 76,  order: 3 },
+  { name: 'Chinese',         emoji: '🥡', imageUrl: '', searchTerm: 'Chinese',     count: 65,  order: 4 },
+  { name: 'Paneer',          emoji: '🧀', imageUrl: '', searchTerm: 'Paneer',      count: 54,  order: 5 },
+  { name: 'Noodles',         emoji: '🍜', imageUrl: '', searchTerm: 'Noodles',     count: 43,  order: 6 },
+  { name: 'Fried Rice',      emoji: '🍚', imageUrl: '', searchTerm: 'Fried Rice',  count: 38,  order: 7 },
+];
+
 // ── Component ────────────────────────────────────────────────────
 export default function FoodCategories() {
   const [tab, setTab]         = useState<TabKey>('foodCategories');
@@ -56,19 +75,39 @@ export default function FoodCategories() {
   const [form, setForm]       = useState<any>(EMPTY_CAT);
   const [saving, setSaving]   = useState(false);
 
-  // Subscribe all 3 collections
+  // Subscribe all 3 collections; auto-seed lunch+trending if empty
   useEffect(() => {
     let loaded = 0;
     const done = () => { if (++loaded === 3) setLoading(false); };
+
     const u1 = onSnapshot(query(collection(db, 'foodCategories'), orderBy('order')),
       s => { setCats(s.docs.map(d => ({ id: d.id, ...d.data() } as FoodCat))); done(); },
       () => done());
+
     const u2 = onSnapshot(query(collection(db, 'lunchSpecials'), orderBy('order')),
-      s => { setLunch(s.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem))); done(); },
+      async s => {
+        const docs = s.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem));
+        setLunch(docs);
+        if (docs.length === 0) {
+          try { for (const item of DEFAULT_LUNCH) await addDoc(collection(db, 'lunchSpecials'), item); }
+          catch { /* silent */ }
+        }
+        done();
+      },
       () => done());
+
     const u3 = onSnapshot(query(collection(db, 'trendingItems'), orderBy('order')),
-      s => { setTrend(s.docs.map(d => ({ id: d.id, ...d.data() } as TrendItem))); done(); },
+      async s => {
+        const docs = s.docs.map(d => ({ id: d.id, ...d.data() } as TrendItem));
+        setTrend(docs);
+        if (docs.length === 0) {
+          try { for (const item of DEFAULT_TREND) await addDoc(collection(db, 'trendingItems'), item); }
+          catch { /* silent */ }
+        }
+        done();
+      },
       () => done());
+
     return () => { u1(); u2(); u3(); };
   }, []);
 
