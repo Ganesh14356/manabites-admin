@@ -15,8 +15,6 @@ import Payouts from './pages/Admin/Payouts';
 import PromoCodes from './pages/Admin/PromoCodes';
 import Banners from './pages/Admin/Banners';
 import FoodCategories from './pages/Admin/FoodCategories';
-import LunchSpecials  from './pages/Admin/LunchSpecials';
-import TrendingItems  from './pages/Admin/TrendingItems';
 import RestaurantApproval from './pages/Admin/RestaurantApproval';
 import RazorpayPayments from './pages/Admin/RazorpayPayments';
 import RiderManagement from './pages/Admin/RiderManagement';
@@ -94,8 +92,6 @@ export default function App() {
                 <Route path="promocodes" element={<PromoCodes />} />
                 <Route path="banners" element={<Banners />} />
                 <Route path="food-categories"  element={<FoodCategories />} />
-                <Route path="lunch-specials"   element={<LunchSpecials />} />
-                <Route path="trending-items"   element={<TrendingItems />} />
                 <Route path="restaurants-approval" element={<RestaurantApproval />} />
                 <Route path="razorpay" element={<RazorpayPayments />} />
                 <Route path="settings" element={<DeliveryFeeSettings />} />

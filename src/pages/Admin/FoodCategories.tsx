@@ -2,38 +2,32 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc, getDocs,
+  addDoc, updateDoc, deleteDoc, doc,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Plus, Edit2, Trash2, X, GripVertical, Image, RefreshCw } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Image } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const DEFAULT_CATEGORIES = [
-  { name: 'Biryani',      emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',      bgColor: 'bg-amber-50',  order: 0 },
-  { name: 'Pizza',        emoji: '🍕', imageUrl: '', searchTerm: 'Pizza',        bgColor: 'bg-red-50',    order: 1 },
-  { name: 'Burger',       emoji: '🍔', imageUrl: '', searchTerm: 'Burger',       bgColor: 'bg-yellow-50', order: 2 },
-  { name: 'Chinese',      emoji: '🥡', imageUrl: '', searchTerm: 'Chinese',      bgColor: 'bg-orange-50', order: 3 },
-  { name: 'South Indian', emoji: '🥘', imageUrl: '', searchTerm: 'South Indian', bgColor: 'bg-green-50',  order: 4 },
-  { name: 'Desserts',     emoji: '🍰', imageUrl: '', searchTerm: 'Desserts',     bgColor: 'bg-pink-50',   order: 5 },
-  { name: 'North Indian', emoji: '🍲', imageUrl: '', searchTerm: 'North Indian', bgColor: 'bg-orange-50', order: 6 },
-  { name: 'Healthy',      emoji: '🥗', imageUrl: '', searchTerm: 'Healthy',      bgColor: 'bg-lime-50',   order: 7 },
-  { name: 'Fast Food',    emoji: '🌮', imageUrl: '', searchTerm: 'Fast Food',    bgColor: 'bg-yellow-50', order: 8 },
-  { name: 'Beverages',    emoji: '☕', imageUrl: '', searchTerm: 'Beverages',    bgColor: 'bg-stone-50',  order: 9 },
-];
-
-interface FoodCategory {
+// ── Types ────────────────────────────────────────────────────────
+interface BaseItem {
   id: string;
   name: string;
   emoji: string;
   imageUrl: string;
   searchTerm: string;
-  bgColor: string;
   order: number;
 }
+interface FoodCat extends BaseItem { bgColor: string; }
+interface LunchItem extends BaseItem { subtitle: string; }
+interface TrendItem extends BaseItem { count: number; }
 
-const EMPTY: Omit<FoodCategory, 'id'> = {
-  name: '', emoji: '🍛', imageUrl: '', searchTerm: '', bgColor: 'bg-amber-50', order: 0,
-};
+// ── Tab config ───────────────────────────────────────────────────
+const TABS = [
+  { key: 'foodCategories', label: "What's On Your Mind", icon: '🍽️', hint: 'Category chips shown on home screen' },
+  { key: 'lunchSpecials',  label: 'Lunch Specials',      icon: '🍱', hint: 'Shown as horizontal scroll on home screen' },
+  { key: 'trendingItems',  label: 'Trending This Week',  icon: '🔥', hint: 'Trending section on home screen' },
+] as const;
+type TabKey = typeof TABS[number]['key'];
 
 const BG_OPTIONS = [
   { label: 'Amber',  value: 'bg-amber-50'  },
@@ -46,316 +40,250 @@ const BG_OPTIONS = [
   { label: 'Stone',  value: 'bg-stone-50'  },
 ];
 
-export default function FoodCategories() {
-  const [cats, setCats]         = useState<FoodCategory[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [form, setForm]         = useState<Omit<FoodCategory, 'id'> | null>(null);
-  const [editId, setEditId]     = useState<string | null>(null);
-  const [saving, setSaving]     = useState(false);
-  const [seeding, setSeeding]   = useState(false);
+const EMPTY_CAT   = { name: '', emoji: '🍛', imageUrl: '', searchTerm: '', bgColor: 'bg-amber-50', order: 0 };
+const EMPTY_LUNCH = { name: '', emoji: '🍱', imageUrl: '', searchTerm: '', subtitle: "Today's Special", order: 0 };
+const EMPTY_TREND = { name: '', emoji: '🍽️', imageUrl: '', searchTerm: '', count: 0, order: 0 };
 
+// ── Component ────────────────────────────────────────────────────
+export default function FoodCategories() {
+  const [tab, setTab]         = useState<TabKey>('foodCategories');
+  const [cats, setCats]       = useState<FoodCat[]>([]);
+  const [lunch, setLunch]     = useState<LunchItem[]>([]);
+  const [trend, setTrend]     = useState<TrendItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal]     = useState(false);
+  const [editId, setEditId]   = useState<string | null>(null);
+  const [form, setForm]       = useState<any>(EMPTY_CAT);
+  const [saving, setSaving]   = useState(false);
+
+  // Subscribe all 3 collections
   useEffect(() => {
-    const unsub = onSnapshot(
-      query(collection(db, 'foodCategories'), orderBy('order')),
-      snap => {
-        setCats(snap.docs.map(d => ({ id: d.id, ...d.data() } as FoodCategory)));
-        setLoading(false);
-      },
-      err => { console.error(err); setLoading(false); }
-    );
-    return unsub;
+    let loaded = 0;
+    const done = () => { if (++loaded === 3) setLoading(false); };
+    const u1 = onSnapshot(query(collection(db, 'foodCategories'), orderBy('order')),
+      s => { setCats(s.docs.map(d => ({ id: d.id, ...d.data() } as FoodCat))); done(); },
+      () => done());
+    const u2 = onSnapshot(query(collection(db, 'lunchSpecials'), orderBy('order')),
+      s => { setLunch(s.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem))); done(); },
+      () => done());
+    const u3 = onSnapshot(query(collection(db, 'trendingItems'), orderBy('order')),
+      s => { setTrend(s.docs.map(d => ({ id: d.id, ...d.data() } as TrendItem))); done(); },
+      () => done());
+    return () => { u1(); u2(); u3(); };
   }, []);
 
-  const loadDefaults = async () => {
-    if (!window.confirm('This will DELETE all existing categories and load 10 defaults. Continue?')) return;
-    setSeeding(true);
-    try {
-      const col = collection(db, 'foodCategories');
-      const existing = await getDocs(col);
-      for (const d of existing.docs) await deleteDoc(d.ref);
-      for (const cat of DEFAULT_CATEGORIES) await addDoc(col, cat);
-      toast.success('Default categories loaded!');
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to load defaults');
-    }
-    finally { setSeeding(false); }
+  const items = tab === 'foodCategories' ? cats : tab === 'lunchSpecials' ? lunch : trend;
+
+  const emptyForm = () => {
+    if (tab === 'foodCategories') return { ...EMPTY_CAT, order: cats.length };
+    if (tab === 'lunchSpecials')  return { ...EMPTY_LUNCH, order: lunch.length };
+    return { ...EMPTY_TREND, order: trend.length };
   };
 
-  const removeDuplicates = async () => {
-    setSeeding(true);
-    try {
-      const snap = await getDocs(collection(db, 'foodCategories'));
-      const seen = new Map<string, string>(); // name → docId to KEEP
-      const toDelete: string[] = [];
-      // Keep the doc with imageUrl if available; otherwise keep first
-      snap.docs.forEach(d => {
-        const name = (d.data().name || '').trim().toLowerCase();
-        const hasImage = !!(d.data().imageUrl);
-        if (!seen.has(name)) {
-          seen.set(name, d.id);
-        } else if (hasImage) {
-          // This one has an image — swap: keep this, delete the one we stored before
-          toDelete.push(seen.get(name)!);
-          seen.set(name, d.id);
-        } else {
-          toDelete.push(d.id);
-        }
-      });
-      for (const id of toDelete) await deleteDoc(doc(db, 'foodCategories', id));
-      toast.success(`Removed ${toDelete.length} duplicate(s)`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed');
-    }
-    finally { setSeeding(false); }
+  const openAdd  = () => { setEditId(null); setForm(emptyForm()); setModal(true); };
+  const openEdit = (item: any) => {
+    setEditId(item.id);
+    const { id, ...rest } = item;
+    setForm({ ...rest });
+    setModal(true);
   };
-
-  const openAdd = () => { setForm({ ...EMPTY, order: cats.length }); setEditId(null); };
-  const openEdit = (c: FoodCategory) => {
-    setForm({ name: c.name, emoji: c.emoji, imageUrl: c.imageUrl, searchTerm: c.searchTerm, bgColor: c.bgColor, order: c.order });
-    setEditId(c.id);
-  };
-  const close = () => { setForm(null); setEditId(null); };
+  const closeModal = () => { setModal(false); setEditId(null); };
 
   const save = async () => {
-    if (!form || !form.name.trim() || !form.searchTerm.trim()) return;
+    if (!form.name?.trim()) { toast.error('Name required'); return; }
     setSaving(true);
     try {
       if (editId) {
-        await updateDoc(doc(db, 'foodCategories', editId), { ...form });
-        toast.success('Category updated');
+        await updateDoc(doc(db, tab, editId), { ...form });
+        toast.success('Updated!');
       } else {
-        await addDoc(collection(db, 'foodCategories'), { ...form });
-        toast.success('Category added');
+        await addDoc(collection(db, tab), { ...form });
+        toast.success('Added!');
       }
-      close();
-    } catch (e) {
-      console.error(e);
-      toast.error('Save failed');
-    } finally {
-      setSaving(false);
-    }
+      closeModal();
+    } catch (e: any) { toast.error(e?.message || 'Failed'); }
+    finally { setSaving(false); }
   };
 
   const del = async (id: string, name: string) => {
     if (!window.confirm(`Delete "${name}"?`)) return;
-    try {
-      await deleteDoc(doc(db, 'foodCategories', id));
-      toast.success('Deleted');
-    } catch {
-      toast.error('Delete failed');
-    }
+    try { await deleteDoc(doc(db, tab, id)); toast.success('Deleted'); }
+    catch (e: any) { toast.error(e?.message || 'Failed'); }
   };
 
+  const F = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6">
+    <div className="p-6 max-w-4xl mx-auto space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 dark:text-white">Food Categories</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            These appear as category chips on the ManaBites home screen. If none are added, default categories are shown.
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-end">
-          {cats.length > 10 && (
-            <button
-              onClick={removeDuplicates}
-              disabled={seeding}
-              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold text-sm hover:bg-red-100 transition disabled:opacity-50"
-            >
-              🧹 Remove Duplicates ({cats.length - 10} extra)
-            </button>
-          )}
-          <button
-            onClick={loadDefaults}
-            disabled={seeding}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 rounded-xl font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={seeding ? 'animate-spin' : ''} />
-            {seeding ? 'Working…' : 'Reset to Defaults'}
-          </button>
-          <button
-            onClick={openAdd}
-            className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90 transition"
-          >
-            <Plus size={16} /> Add Category
-          </button>
-        </div>
+        <h1 className="text-2xl font-black text-gray-900 dark:text-white">Home Screen Sections</h1>
+        <button onClick={openAdd}
+          className="flex items-center gap-2 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm shadow hover:opacity-90">
+          <Plus size={16} /> Add Item
+        </button>
       </div>
 
-      {/* Preview note */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 text-sm text-blue-700 dark:text-blue-300">
-        <strong>How it works:</strong> Add ≥ 4 categories here and they will replace the default emoji grid on the customer home screen. Each category can have an image URL (shown instead of emoji) and a search term (what gets searched when customer taps it).
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl">
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-sm font-bold transition-all ${
+              tab === t.key
+                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-white shadow'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}>
+            <span>{t.icon}</span>
+            <span className="hidden sm:inline">{t.label}</span>
+            <span className="sm:hidden">{t.label.split(' ')[0]}</span>
+            <span className="text-[10px] font-black bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded-full ml-0.5">
+              {t.key === 'foodCategories' ? cats.length : t.key === 'lunchSpecials' ? lunch.length : trend.length}
+            </span>
+          </button>
+        ))}
       </div>
 
-      {/* Category list */}
+      {/* Hint */}
+      <p className="text-xs text-gray-400 font-medium px-1">
+        {TABS.find(t => t.key === tab)?.hint}
+      </p>
+
+      {/* List */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="h-20 bg-gray-100 dark:bg-gray-800 rounded-2xl animate-pulse" />
-          ))}
+          {[...Array(4)].map((_, i) => <div key={i} className="h-20 bg-gray-100 dark:bg-gray-800 rounded-2xl animate-pulse" />)}
         </div>
-      ) : cats.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
-          <div className="text-5xl mb-3">📂</div>
-          <p className="font-black text-gray-700 dark:text-white text-lg">No custom categories yet</p>
-          <p className="text-sm text-gray-400 mt-1">Default categories (Biryani, Pizza, etc.) are shown to customers.</p>
+          <div className="text-5xl mb-3">{TABS.find(t => t.key === tab)?.icon}</div>
+          <p className="font-black text-gray-700 dark:text-white">No items yet</p>
           <button onClick={openAdd} className="mt-4 px-5 py-2.5 bg-brand text-white rounded-xl font-bold text-sm">
-            Add First Category
+            Add First Item
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {cats.map(c => (
-            <motion.div
-              key={c.id}
-              layout
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm p-4 flex items-center gap-4"
-            >
-              <GripVertical size={16} className="text-gray-300 flex-shrink-0" />
-
-              {/* Image / emoji preview */}
-              <div className="w-14 h-14 rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 flex items-center justify-center flex-shrink-0">
-                {c.imageUrl ? (
-                  <img
-                    src={c.imageUrl} alt={c.name}
-                    className="w-full h-full object-cover"
-                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <span className="text-3xl">{c.emoji}</span>
-                )}
+          {(items as any[]).map(item => (
+            <motion.div key={item.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+              className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-4 flex items-center gap-3">
+              <div className="w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800">
+                {item.imageUrl
+                  ? <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover"
+                      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                  : <span className="text-3xl">{item.emoji}</span>}
               </div>
-
               <div className="flex-1 min-w-0">
-                <p className="font-black text-gray-900 dark:text-white truncate">{c.name}</p>
+                <p className="font-black text-gray-900 dark:text-white truncate">{item.name}</p>
                 <p className="text-xs text-gray-400 truncate mt-0.5">
-                  Search: "<span className="text-gray-600 dark:text-gray-300">{c.searchTerm}</span>" · #{c.order}
+                  {item.searchTerm && `Search: "${item.searchTerm}"`}
+                  {(item as TrendItem).count ? ` · ${(item as TrendItem).count}+ orders` : ''}
+                  {(item as LunchItem).subtitle ? ` · ${(item as LunchItem).subtitle}` : ''}
                 </p>
-                {c.imageUrl && (
-                  <p className="text-[10px] text-blue-500 truncate mt-0.5 flex items-center gap-1">
-                    <Image size={10} /> Custom image
+                {item.imageUrl && (
+                  <p className="text-[10px] text-blue-500 mt-0.5 flex items-center gap-1">
+                    <Image size={9} /> Custom image
                   </p>
                 )}
               </div>
-
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button onClick={() => openEdit(c)} className="p-2 text-gray-400 hover:text-brand rounded-lg transition-colors">
-                  <Edit2 size={15} />
-                </button>
-                <button onClick={() => del(c.id, c.name)} className="p-2 text-gray-400 hover:text-red-500 rounded-lg transition-colors">
-                  <Trash2 size={15} />
-                </button>
+              <div className="flex gap-1 flex-shrink-0">
+                <button onClick={() => openEdit(item)} className="p-2 text-gray-400 hover:text-brand rounded-xl transition-colors"><Edit2 size={15} /></button>
+                <button onClick={() => del(item.id, item.name)} className="p-2 text-gray-400 hover:text-red-500 rounded-xl transition-colors"><Trash2 size={15} /></button>
               </div>
             </motion.div>
           ))}
         </div>
       )}
 
-      {/* Add / Edit drawer */}
+      {/* Modal */}
       <AnimatePresence>
-        {form && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
-            onClick={e => { if (e.target === e.currentTarget) close(); }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-2xl p-6 space-y-4"
-            >
+        {modal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) closeModal(); }}>
+            <motion.div initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
+              className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-2xl p-6 space-y-4">
               <div className="flex justify-between items-center">
-                <h2 className="text-lg font-black text-gray-900 dark:text-white">{editId ? 'Edit' : 'Add'} Category</h2>
-                <button onClick={close} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"><X size={18} /></button>
+                <h2 className="text-lg font-black text-gray-900 dark:text-white">
+                  {editId ? 'Edit' : 'Add'} — {TABS.find(t => t.key === tab)?.label}
+                </h2>
+                <button onClick={closeModal} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg"><X size={18} /></button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 block mb-1">Name *</label>
-                  <input
-                    value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
-                    placeholder="Biryani"
-                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-brand outline-none text-gray-900 dark:text-white"
-                  />
+              <div className="grid grid-cols-4 gap-3">
+                <div className="col-span-1">
+                  <label className="text-xs font-bold text-gray-500 block mb-1">Emoji</label>
+                  <input value={form.emoji} onChange={e => F('emoji', e.target.value)}
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-2 py-2.5 text-xl text-center focus:border-brand outline-none" />
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 block mb-1">Emoji (fallback)</label>
-                  <input
-                    value={form.emoji}
-                    onChange={e => setForm({ ...form, emoji: e.target.value })}
-                    placeholder="🍛"
-                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-xl focus:border-brand outline-none text-center"
-                  />
+                <div className="col-span-3">
+                  <label className="text-xs font-bold text-gray-500 block mb-1">Name *</label>
+                  <input value={form.name} onChange={e => F('name', e.target.value)} placeholder="e.g. Biryani"
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-brand outline-none text-gray-900 dark:text-white" />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-500 block mb-1">
-                  Image URL <span className="font-normal text-gray-400">(optional — replaces emoji on home screen)</span>
-                </label>
-                <input
-                  value={form.imageUrl}
-                  onChange={e => setForm({ ...form, imageUrl: e.target.value })}
-                  placeholder="https://images.unsplash.com/photo-..."
-                  className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white"
-                />
-                {form.imageUrl ? (
-                  <div className="mt-2 flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl">
-                    <img src={form.imageUrl} alt="preview" className="w-12 h-12 rounded-xl object-cover"
-                      onError={e => { (e.currentTarget as HTMLImageElement).src = ''; }} />
-                    <span className="text-xs text-gray-400">Image preview</span>
-                  </div>
-                ) : null}
+                <label className="text-xs font-bold text-gray-500 block mb-1 flex items-center gap-1"><Image size={11} /> Image URL</label>
+                <input value={form.imageUrl} onChange={e => F('imageUrl', e.target.value)} placeholder="https://..."
+                  className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
+                {form.imageUrl && (
+                  <img src={form.imageUrl} alt="preview" className="mt-2 h-24 w-full object-cover rounded-xl"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-gray-500 block mb-1">Search Term *</label>
-                  <input
-                    value={form.searchTerm}
-                    onChange={e => setForm({ ...form, searchTerm: e.target.value })}
-                    placeholder="Biryani"
-                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-brand outline-none text-gray-900 dark:text-white"
-                  />
+                  <label className="text-xs font-bold text-gray-500 block mb-1">Search Term</label>
+                  <input value={form.searchTerm} onChange={e => F('searchTerm', e.target.value)} placeholder="e.g. Biryani"
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-gray-500 block mb-1">Display Order</label>
-                  <input
-                    type="number"
-                    value={form.order}
-                    onChange={e => setForm({ ...form, order: Number(e.target.value) })}
-                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm font-bold focus:border-brand outline-none text-gray-900 dark:text-white"
-                  />
+                  <input type="number" value={form.order} onChange={e => F('order', Number(e.target.value))}
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-gray-500 block mb-2">Background Color</label>
-                <div className="flex gap-2 flex-wrap">
-                  {BG_OPTIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setForm({ ...form, bgColor: opt.value })}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all ${opt.value} ${
-                        form.bgColor === opt.value ? 'border-brand shadow' : 'border-transparent'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+              {tab === 'lunchSpecials' && (
+                <div>
+                  <label className="text-xs font-bold text-gray-500 block mb-1">Subtitle</label>
+                  <input value={form.subtitle || ''} onChange={e => F('subtitle', e.target.value)} placeholder="e.g. Today's Special"
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
                 </div>
-              </div>
+              )}
 
-              <button
-                onClick={save}
-                disabled={saving || !form.name.trim() || !form.searchTerm.trim()}
-                className="w-full py-3 bg-brand text-white rounded-2xl font-black text-sm disabled:opacity-50 shadow"
-              >
-                {saving ? 'Saving…' : editId ? 'Update Category' : 'Add Category'}
-              </button>
+              {tab === 'trendingItems' && (
+                <div>
+                  <label className="text-xs font-bold text-gray-500 block mb-1">Order Count (shown as "X+ orders")</label>
+                  <input type="number" value={form.count || 0} onChange={e => F('count', Number(e.target.value))} placeholder="120"
+                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
+                </div>
+              )}
+
+              {tab === 'foodCategories' && (
+                <div>
+                  <label className="text-xs font-bold text-gray-500 block mb-2">Background Color</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {BG_OPTIONS.map(opt => (
+                      <button key={opt.value} onClick={() => F('bgColor', opt.value)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border-2 transition-all ${opt.value} ${
+                          form.bgColor === opt.value ? 'border-brand shadow' : 'border-transparent'
+                        }`}>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button onClick={closeModal} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600">Cancel</button>
+                <button onClick={save} disabled={saving || !form.name?.trim()}
+                  className="flex-1 py-3 bg-brand text-white rounded-2xl font-black text-sm disabled:opacity-50 shadow">
+                  {saving ? 'Saving…' : editId ? 'Update' : 'Add'}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
