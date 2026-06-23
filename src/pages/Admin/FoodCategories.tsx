@@ -41,16 +41,30 @@ const BG_OPTIONS = [
 ];
 
 const EMPTY_CAT   = { name: '', emoji: '🍛', imageUrl: '', searchTerm: '', bgColor: 'bg-amber-50', order: 0 };
-const EMPTY_LUNCH = { name: '', emoji: '🍱', imageUrl: '', searchTerm: '', subtitle: "Today's Special", order: 0 };
+const EMPTY_LUNCH = { name: '', emoji: '🍱', imageUrl: '', searchTerm: '', subtitle: "Today's Special", timeSlot: 'lunch', order: 0 };
 const EMPTY_TREND = { name: '', emoji: '🍽️', imageUrl: '', searchTerm: '', count: 0, order: 0 };
 
 const DEFAULT_LUNCH = [
-  { name: 'Chicken Biryani', emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',    subtitle: 'Afternoon Special', order: 0 },
-  { name: 'Veg Thali',       emoji: '🍽️', imageUrl: '', searchTerm: 'Thali',      subtitle: 'Homestyle Comfort', order: 1 },
-  { name: 'Dal Fry',         emoji: '🫕', imageUrl: '', searchTerm: 'Dal',         subtitle: 'Light & Healthy',   order: 2 },
-  { name: 'Roti Combo',      emoji: '🫓', imageUrl: '', searchTerm: 'Roti',        subtitle: 'Value Meal',        order: 3 },
-  { name: 'Fried Rice',      emoji: '🍚', imageUrl: '', searchTerm: 'Fried Rice',  subtitle: 'Quick Lunch',       order: 4 },
-  { name: 'Paneer Curry',    emoji: '🧀', imageUrl: '', searchTerm: 'Paneer',      subtitle: 'Veg Delight',       order: 5 },
+  // Breakfast (6am–11am)
+  { name: 'Idli Sambar',      emoji: '🥣', imageUrl: '', searchTerm: 'Idli',       subtitle: 'South Indian Classic', timeSlot: 'breakfast', order: 0 },
+  { name: 'Poha',             emoji: '🍚', imageUrl: '', searchTerm: 'Poha',        subtitle: 'Light & Healthy',      timeSlot: 'breakfast', order: 1 },
+  { name: 'Upma',             emoji: '🫕', imageUrl: '', searchTerm: 'Upma',        subtitle: 'Morning Comfort',      timeSlot: 'breakfast', order: 2 },
+  { name: 'Paratha',          emoji: '🫓', imageUrl: '', searchTerm: 'Paratha',     subtitle: 'Punjabi Breakfast',    timeSlot: 'breakfast', order: 3 },
+  // Lunch (11am–4pm)
+  { name: 'Chicken Biryani',  emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',    subtitle: 'Afternoon Special',    timeSlot: 'lunch',     order: 4 },
+  { name: 'Veg Thali',        emoji: '🍽️', imageUrl: '', searchTerm: 'Thali',      subtitle: 'Homestyle Comfort',    timeSlot: 'lunch',     order: 5 },
+  { name: 'Dal Fry',          emoji: '🫕', imageUrl: '', searchTerm: 'Dal',         subtitle: 'Light & Filling',      timeSlot: 'lunch',     order: 6 },
+  { name: 'Fried Rice',       emoji: '🍚', imageUrl: '', searchTerm: 'Fried Rice',  subtitle: 'Quick Lunch',          timeSlot: 'lunch',     order: 7 },
+  // Evening (4pm–8pm)
+  { name: 'Samosa',           emoji: '🥟', imageUrl: '', searchTerm: 'Samosa',      subtitle: 'Tea Time Snack',       timeSlot: 'evening',   order: 8 },
+  { name: 'Pakora',           emoji: '🍤', imageUrl: '', searchTerm: 'Pakora',      subtitle: 'Crispy & Hot',         timeSlot: 'evening',   order: 9 },
+  { name: 'Sandwich',         emoji: '🥪', imageUrl: '', searchTerm: 'Sandwich',    subtitle: 'Evening Bite',         timeSlot: 'evening',   order: 10 },
+  { name: 'Chai & Snacks',    emoji: '☕', imageUrl: '', searchTerm: 'Snacks',      subtitle: 'Evening Combo',        timeSlot: 'evening',   order: 11 },
+  // Dinner (8pm–midnight)
+  { name: 'Butter Chicken',   emoji: '🍗', imageUrl: '', searchTerm: 'Butter Chicken', subtitle: 'North Indian Classic', timeSlot: 'dinner', order: 12 },
+  { name: 'Paneer Curry',     emoji: '🧀', imageUrl: '', searchTerm: 'Paneer',      subtitle: 'Veg Delight',          timeSlot: 'dinner',    order: 13 },
+  { name: 'Naan & Curry',     emoji: '🫓', imageUrl: '', searchTerm: 'Naan',        subtitle: 'Dinner Special',       timeSlot: 'dinner',    order: 14 },
+  { name: 'Biryani',          emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',     subtitle: 'Night Feast',          timeSlot: 'dinner',    order: 15 },
 ];
 const DEFAULT_TREND = [
   { name: 'Chicken Biryani', emoji: '🍛', imageUrl: '', searchTerm: 'Biryani',    count: 120, order: 0 },
@@ -212,7 +226,14 @@ export default function FoodCategories() {
                   : <span className="text-3xl">{item.emoji}</span>}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-black text-gray-900 dark:text-white truncate">{item.name}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="font-black text-gray-900 dark:text-white truncate">{item.name}</p>
+                  {tab === 'lunchSpecials' && item.timeSlot && (
+                    <span className="flex-shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500">
+                      {{ breakfast: '🌅', lunch: '🍱', evening: '☕', dinner: '🌙' }[item.timeSlot as string] || ''} {item.timeSlot}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400 truncate mt-0.5">
                   {item.searchTerm && `Search: "${item.searchTerm}"`}
                   {(item as TrendItem).count ? ` · ${(item as TrendItem).count}+ orders` : ''}
@@ -285,11 +306,35 @@ export default function FoodCategories() {
               </div>
 
               {tab === 'lunchSpecials' && (
-                <div>
-                  <label className="text-xs font-bold text-gray-500 block mb-1">Subtitle</label>
-                  <input value={form.subtitle || ''} onChange={e => F('subtitle', e.target.value)} placeholder="e.g. Today's Special"
-                    className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
-                </div>
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-2">Show At Time ⏰</label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { value: 'breakfast', label: 'Breakfast', emoji: '🌅', sub: '6am–11am'  },
+                        { value: 'lunch',     label: 'Lunch',     emoji: '🍱', sub: '11am–4pm'  },
+                        { value: 'evening',   label: 'Evening',   emoji: '☕', sub: '4pm–8pm'   },
+                        { value: 'dinner',    label: 'Dinner',    emoji: '🌙', sub: '8pm–12am'  },
+                      ].map(s => (
+                        <button key={s.value} type="button" onClick={() => F('timeSlot', s.value)}
+                          className={`flex flex-col items-center py-2 px-1 rounded-xl border-2 text-center transition-all ${
+                            form.timeSlot === s.value
+                              ? 'border-brand bg-brand/5 shadow'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
+                          }`}>
+                          <span className="text-lg">{s.emoji}</span>
+                          <span className="text-[10px] font-black text-gray-800 dark:text-white mt-0.5">{s.label}</span>
+                          <span className="text-[9px] text-gray-400">{s.sub}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 block mb-1">Subtitle</label>
+                    <input value={form.subtitle || ''} onChange={e => F('subtitle', e.target.value)} placeholder="e.g. Today's Special"
+                      className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
+                  </div>
+                </>
               )}
 
               {tab === 'trendingItems' && (
