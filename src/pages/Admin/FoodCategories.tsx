@@ -76,7 +76,7 @@ export default function FoodCategories() {
       });
       await batch.commit();
       toast.success('Default categories loaded!');
-    } catch { toast.error('Failed to load defaults'); }
+    } catch (e: any) { console.error('loadDefaults error:', e); toast.error(e?.message || 'Failed to load defaults'); }
     finally { setSeeding(false); }
   };
 
