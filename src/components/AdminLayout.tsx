@@ -53,6 +53,8 @@ const BASE_NAV = [
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
   { name: 'Food Categories',      path: '/admin/food-categories',      icon: UtensilsCrossed },
+  { name: 'Lunch Specials',       path: '/admin/lunch-specials',       icon: Package         },
+  { name: 'Trending This Week',   path: '/admin/trending-items',       icon: TrendingUp      },
   { name: 'Fraud Detection',     path: '/admin/fraud',                icon: ShieldAlert },
   { name: 'Blacklist',           path: '/admin/blacklist',            icon: Ban        },
   { name: 'Rider Incentives',      path: '/admin/rider-incentives',     icon: Gift       },
