@@ -257,6 +257,19 @@ export default function FoodCategories() {
         {TABS.find(t => t.key === tab)?.hint}
       </p>
 
+      {/* Duplicate warning banner */}
+      {tab === 'lunchSpecials' && lunch.length > 16 && (
+        <div className="flex items-center justify-between gap-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl px-4 py-3">
+          <p className="text-sm font-bold text-red-600 dark:text-red-400">
+            ⚠️ {lunch.length} items found (expected 16) — duplicates detected!
+          </p>
+          <button onClick={resetLunch}
+            className="flex-shrink-0 px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 transition">
+            🔄 Fix Now
+          </button>
+        </div>
+      )}
+
       {/* List */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
