@@ -370,7 +370,7 @@ export default function RefundManagement() {
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(order => (
                   <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-4 font-black text-gray-900"><OrderId id={order.id} /></td>
+                    <td className="px-5 py-4 font-black text-gray-900"><OrderId id={order.id} displayOrderId={(order as any).displayOrderId} /></td>
                     <td className="px-5 py-4 text-gray-700 font-bold">{order.customerName || '—'}</td>
                     <td className="px-5 py-4 text-gray-700 font-bold truncate max-w-[140px]">{order.restaurantName}</td>
                     <td className="px-5 py-4 font-black text-brand">₹{order.totalAmount}</td>

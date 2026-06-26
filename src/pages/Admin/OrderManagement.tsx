@@ -732,7 +732,7 @@ export default function OrderManagement() {
                   </div>
                   <div>
                     <h3 className="text-sm font-black text-gray-800">Assign Rider</h3>
-                    <p className="text-[11px] text-gray-400">Order <OrderId id={selectedOrder.id} className="text-[11px]" /></p>
+                    <p className="text-[11px] text-gray-400">Order <OrderId id={selectedOrder.id} displayOrderId={(selectedOrder as any).displayOrderId} className="text-[11px]" /></p>
                   </div>
                 </div>
                 <button

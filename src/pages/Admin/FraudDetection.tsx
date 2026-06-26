@@ -108,7 +108,7 @@ function FlagCard({ order }: { order: FlaggedOrder }) {
               </div>
               <p className="text-xs text-red-600 font-semibold mt-0.5">{order.reason}</p>
               <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                <span>Order <OrderId id={order.id} /></span>
+                <span>Order <OrderId id={order.id} displayOrderId={(order as any).displayOrderId} /></span>
                 <span>₹{order.total ?? '—'}</span>
                 <span className="uppercase">{order.paymentMode ?? '—'}</span>
                 <span>{date}</span>

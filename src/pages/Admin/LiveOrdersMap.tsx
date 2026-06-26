@@ -272,7 +272,7 @@ export default function LiveOrdersMap() {
                       <Popup>
                         <div className="text-sm">
                           <p className="font-black">{order.restaurantName}</p>
-                          <p className="text-gray-500 text-xs"><OrderId id={order.id} className="text-xs" /></p>
+                          <p className="text-gray-500 text-xs"><OrderId id={order.id} displayOrderId={(order as any).displayOrderId} className="text-xs" /></p>
                           <p style={{ color }} className="capitalize font-bold text-xs mt-1">
                             {order.status.replace(/_/g, ' ')}
                           </p>
@@ -350,7 +350,7 @@ export default function LiveOrdersMap() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <OrderId id={order.id} className="text-xs font-black" />
+                    <OrderId id={order.id} displayOrderId={(order as any).displayOrderId} className="text-xs font-black" />
                     <span
                       className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full"
                       style={{ background: color + '20', color }}
