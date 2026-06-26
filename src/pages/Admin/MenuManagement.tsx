@@ -14,14 +14,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { uploadToImgBB } from '../../lib/imgbb';
 import {
   Plus, Edit2, Trash2, ToggleLeft, ToggleRight,
-  ArrowLeft, X, Search, Image as ImageIcon, Camera
+  ArrowLeft, X, Search, Image as ImageIcon, Camera, Link as LinkIcon
 } from 'lucide-react';
 
 const menuItemSchema = z.object({
   name: z.string().min(2, 'Name is required'),
   description: z.string().optional(),
   price: z.string().refine(v => !isNaN(Number(v)) && Number(v) >= 0, 'Invalid price'),
-  category: z.string().min(2, 'Category is required'),
+  category: z.string().min(1, 'Category is required'),
   isVeg: z.boolean().optional(),
 });
 
@@ -34,6 +34,7 @@ export default function MenuManagement() {
 
   const [restaurantName, setRestaurantName] = useState('');
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -42,6 +43,8 @@ export default function MenuManagement() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<MenuFormData>({
     resolver: zodResolver(menuItemSchema),
@@ -56,29 +59,34 @@ export default function MenuManagement() {
   useEffect(() => {
     if (!restaurantId) return;
 
-    // Fetch restaurant name
     getDoc(doc(db, 'restaurants', restaurantId)).then(snap => {
-      if (snap.exists()) {
-        setRestaurantName(snap.data().name);
-      }
+      if (snap.exists()) setRestaurantName(snap.data().name);
     });
 
-    // Listen to menu items (top-level collection filtered by restaurantId)
+    // Load restaurant's saved categories
+    const catQ = query(
+      collection(db, 'menuCategories'),
+      where('restaurantId', '==', restaurantId),
+      orderBy('order', 'asc')
+    );
+    const unsubCat = onSnapshot(catQ, snap => {
+      setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, () => {});
+
     const q = query(
       collection(db, 'menuItems'),
       where('restaurantId', '==', restaurantId),
       orderBy('createdAt', 'desc')
     );
-
     const unsub = onSnapshot(q, snapshot => {
       setMenuItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
       setLoading(false);
-    }, err => {
+    }, () => {
       toast.error('Failed to load menu items');
       setLoading(false);
     });
 
-    return () => unsub();
+    return () => { unsub(); unsubCat(); };
   }, [restaurantId]);
 
   const filteredItems = useMemo(() => {
@@ -87,6 +95,15 @@ export default function MenuManagement() {
       (item.category ?? item.categoryId ?? '').toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [menuItems, searchQuery]);
+
+  const applyUrl = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    setPreviewUrl(url);
+    setImageFile(null);
+    setShowUrlInput(false);
+    setUrlInput('');
+  };
 
   const onSubmit = async (data: MenuFormData) => {
     if (!restaurantId) return;
@@ -104,9 +121,15 @@ export default function MenuManagement() {
         return;
       }
       setUploadingImage(false);
+    } else if (previewUrl && !imageFile) {
+      imageUrl = previewUrl; // URL paste
     } else if (!previewUrl) {
       imageUrl = '';
     }
+
+    // Find categoryId from saved categories
+    const matchedCat = categories.find(c => c.name === data.category);
+    const categoryId = matchedCat?.id || editTarget?.categoryId || '';
 
     try {
       if (editTarget) {
@@ -115,6 +138,7 @@ export default function MenuManagement() {
           description: data.description || '',
           price: Number(data.price),
           category: data.category,
+          categoryId,
           isVeg: data.isVeg ?? false,
           imageUrl,
           updatedAt: serverTimestamp(),
@@ -127,6 +151,7 @@ export default function MenuManagement() {
           description: data.description || '',
           price: Number(data.price),
           category: data.category,
+          categoryId,
           isVeg: data.isVeg ?? false,
           imageUrl,
           isAvailable: true,
@@ -144,11 +169,9 @@ export default function MenuManagement() {
 
   const handleToggleStatus = async (item: any) => {
     try {
-      await updateDoc(doc(db, 'menuItems', item.id), {
-        isAvailable: !item.isAvailable
-      });
+      await updateDoc(doc(db, 'menuItems', item.id), { isAvailable: !item.isAvailable });
       toast.success(`Item ${item.isAvailable ? 'disabled' : 'enabled'}`);
-    } catch (error) {
+    } catch {
       toast.error('Failed to update status');
     }
   };
@@ -157,7 +180,7 @@ export default function MenuManagement() {
     try {
       await deleteDoc(doc(db, 'menuItems', item.id));
       toast.success('Item deleted successfully');
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete item');
     }
   };
@@ -168,11 +191,13 @@ export default function MenuManagement() {
       name: item.name,
       description: item.description,
       price: item.price.toString(),
-      category: item.category,
+      category: item.category || '',
       isVeg: item.isVeg ?? false,
     });
     setPreviewUrl(item.imageUrl || null);
     setImageFile(null);
+    setShowUrlInput(false);
+    setUrlInput('');
     setShowAddModal(true);
   };
 
@@ -181,55 +206,52 @@ export default function MenuManagement() {
     setEditTarget(null);
     setImageFile(null);
     setPreviewUrl(null);
+    setShowUrlInput(false);
+    setUrlInput('');
     reset({ name: '', description: '', price: '', category: '', isVeg: false });
   };
+
+  // Clipboard paste support — Ctrl+V pastes an image when modal is open
+  useEffect(() => {
+    if (!showAddModal) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items || []);
+      const imgItem = items.find(it => it.type.startsWith('image/'));
+      if (!imgItem) return;
+      const file = imgItem.getAsFile();
+      if (!file) return;
+      setImageFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      setShowUrlInput(false);
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [showAddModal]);
 
   if (authLoading) return <div className="p-8 text-center">Loading...</div>;
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 pb-16">
-      {/* Header */}
-      <motion.div
-        className="mb-6"
-        initial={{ opacity: 0, y: -12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      <motion.div className="mb-6" initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
         <Link to="/admin/restaurants" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-brand mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back to Restaurants
         </Link>
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">
-              🍽️ Menu Management
-            </h1>
-            <p className="text-gray-400 text-sm mt-0.5">
-              {restaurantName ? `Managing menu for ${restaurantName}` : 'Loading...'}
-            </p>
+            <h1 className="text-2xl font-black text-gray-800 flex items-center gap-2">🍽️ Menu Management</h1>
+            <p className="text-gray-400 text-sm mt-0.5">{restaurantName ? `Managing menu for ${restaurantName}` : 'Loading...'}</p>
           </div>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setShowAddModal(true)}
-            className="btn-primary w-auto px-5"
-          >
+          <motion.button whileTap={{ scale: 0.97 }} onClick={() => setShowAddModal(true)} className="btn-primary w-auto px-5">
             <Plus className="w-5 h-5" /> Add Item
           </motion.button>
         </div>
       </motion.div>
 
-      {/* Search */}
       <div className="relative mb-6 max-w-md">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Search menu items..."
-          className="input-field pl-10"
-        />
+        <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search menu items..." className="input-field pl-10" />
       </div>
 
-      {/* Menu Grid */}
       {loading ? (
         <div className="text-center py-12 text-gray-400">Loading menu...</div>
       ) : filteredItems.length === 0 ? (
@@ -248,12 +270,9 @@ export default function MenuManagement() {
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ delay: i * 0.05, duration: 0.28 }}
                 whileHover={{ y: -4, boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}
-                className={`bg-white rounded-2xl shadow-card p-4 border-2 transition-colors ${
-                  item.isAvailable ? 'border-transparent' : 'border-gray-200 opacity-75'
-                }`}
+                className={`bg-white rounded-2xl shadow-card p-4 border-2 transition-colors ${item.isAvailable ? 'border-transparent' : 'border-gray-200 opacity-75'}`}
               >
                 <div className="flex gap-4">
-                  {/* Image Placeholder */}
                   <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
                     {item.imageUrl ? (
                       <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
@@ -261,42 +280,25 @@ export default function MenuManagement() {
                       <ImageIcon className="w-8 h-8 text-gray-300" />
                     )}
                   </div>
-                  
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-start mb-1">
                       <h3 className="font-bold text-gray-800 truncate pr-2">{item.name}</h3>
                       <span className="font-black text-brand">₹{item.price}</span>
                     </div>
                     <p className="text-xs text-gray-400 mb-2 truncate">{item.category}</p>
-                    <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed mb-3">
-                      {item.description || 'No description'}
-                    </p>
-                    
+                    <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed mb-3">{item.description || 'No description'}</p>
                     <div className="flex items-center justify-between mt-auto">
                       <span className={`badge ${item.isAvailable ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                         {item.isAvailable ? 'Available' : 'Disabled'}
                       </span>
-                      
                       <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleToggleStatus(item)}
-                          className={`p-1.5 rounded-lg transition-colors ${
-                            item.isAvailable ? 'text-green-600 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-100'
-                          }`}
-                          title={item.isAvailable ? 'Disable item' : 'Enable item'}
-                        >
+                        <button onClick={() => handleToggleStatus(item)} className={`p-1.5 rounded-lg transition-colors ${item.isAvailable ? 'text-green-600 hover:bg-green-50' : 'text-gray-400 hover:bg-gray-100'}`}>
                           {item.isAvailable ? <ToggleRight className="w-5 h-5" /> : <ToggleLeft className="w-5 h-5" />}
                         </button>
-                        <button
-                          onClick={() => openEditModal(item)}
-                          className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                        >
+                        <button onClick={() => openEditModal(item)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => handleDelete(item)}
-                          className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        >
+                        <button onClick={() => handleDelete(item)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -313,11 +315,7 @@ export default function MenuManagement() {
       <AnimatePresence>
         {showAddModal && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 z-40"
-              onClick={closeModal}
-            />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-40" onClick={closeModal} />
             <motion.div
               initial={{ opacity: 0, x: '100%' }}
               animate={{ opacity: 1, x: 0 }}
@@ -326,16 +324,15 @@ export default function MenuManagement() {
               className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white z-50 shadow-2xl overflow-y-auto"
             >
               <div className="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
-                <h2 className="text-lg font-black text-gray-800">
-                  {editTarget ? 'Edit Menu Item' : 'Add Menu Item'}
-                </h2>
+                <h2 className="text-lg font-black text-gray-800">{editTarget ? 'Edit Menu Item' : 'Add Menu Item'}</h2>
                 <button onClick={closeModal} className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-5">
-                {/* Image upload */}
+
+                {/* Image upload + URL paste */}
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Item Photo (Optional)</label>
                   <label className="cursor-pointer block">
@@ -345,7 +342,8 @@ export default function MenuManagement() {
                       ) : (
                         <div className="text-center">
                           <Camera className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                          <p className="text-xs text-gray-400">Click to upload photo</p>
+                          <p className="text-xs font-semibold text-gray-400">Click to upload</p>
+                          <p className="text-[10px] text-gray-300 mt-0.5">or Ctrl+V to paste</p>
                         </div>
                       )}
                     </div>
@@ -354,18 +352,51 @@ export default function MenuManagement() {
                       if (!file) return;
                       setImageFile(file);
                       setPreviewUrl(URL.createObjectURL(file));
+                      setShowUrlInput(false);
                     }} />
                   </label>
+
+                  {/* URL paste input */}
+                  <AnimatePresence>
+                    {!showUrlInput ? (
+                      <motion.button
+                        type="button"
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        onClick={() => setShowUrlInput(true)}
+                        className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-brand bg-gray-50 hover:bg-brand/5 border border-gray-200 hover:border-brand/30 px-3 py-1.5 rounded-lg transition-all"
+                      >
+                        <LinkIcon className="w-3 h-3" /> Paste image link
+                      </motion.button>
+                    ) : (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                        className="mt-2 flex gap-2 overflow-hidden"
+                      >
+                        <input
+                          type="url"
+                          value={urlInput}
+                          onChange={e => setUrlInput(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyUrl(); } }}
+                          placeholder="https://example.com/image.jpg"
+                          className="input-field flex-1 text-xs"
+                          autoFocus
+                        />
+                        <button type="button" onClick={applyUrl} disabled={!urlInput.trim()} className="px-3 py-2 bg-brand text-white text-xs font-bold rounded-lg disabled:opacity-40">Use</button>
+                        <button type="button" onClick={() => { setShowUrlInput(false); setUrlInput(''); }} className="px-2 py-2 bg-gray-100 text-gray-500 rounded-lg">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {previewUrl && (
-                    <button type="button" onClick={() => { setImageFile(null); setPreviewUrl(null); }}
-                      className="mt-1.5 text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                    <button type="button" onClick={() => { setImageFile(null); setPreviewUrl(null); }} className="mt-1.5 text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
                       <X className="w-3 h-3" /> Remove photo
                     </button>
                   )}
                   {uploadingImage && (
                     <p className="text-xs text-brand mt-1 flex items-center gap-1.5">
-                      <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin inline-block" />
-                      Uploading...
+                      <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin inline-block" /> Uploading...
                     </p>
                   )}
                 </div>
@@ -384,7 +415,16 @@ export default function MenuManagement() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Category *</label>
-                    <input {...register('category')} className={`input-field ${errors.category ? 'border-red-400' : ''}`} placeholder="Main Course" />
+                    {categories.length > 0 ? (
+                      <select {...register('category')} className={`input-field ${errors.category ? 'border-red-400' : ''}`}>
+                        <option value="">Select category…</option>
+                        {categories.map(c => (
+                          <option key={c.id} value={c.name}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input {...register('category')} className={`input-field ${errors.category ? 'border-red-400' : ''}`} placeholder="Main Course" />
+                    )}
                     {errors.category && <p className="text-red-500 text-xs mt-1">{errors.category.message}</p>}
                   </div>
                 </div>
@@ -394,7 +434,6 @@ export default function MenuManagement() {
                   <textarea {...register('description')} rows={3} className="input-field resize-none" placeholder="Delicious spicy chicken biryani..." />
                 </div>
 
-                {/* Veg / Non-veg */}
                 <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
                   <div>
                     <p className="text-sm font-semibold text-gray-700">Vegetarian</p>
@@ -406,12 +445,7 @@ export default function MenuManagement() {
                   </label>
                 </div>
 
-                <motion.button
-                  type="submit"
-                  disabled={isSubmitting}
-                  whileTap={{ scale: 0.97 }}
-                  className="btn-primary w-full disabled:opacity-60"
-                >
+                <motion.button type="submit" disabled={isSubmitting} whileTap={{ scale: 0.97 }} className="btn-primary w-full disabled:opacity-60">
                   {isSubmitting ? (
                     <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /> Saving...</>
                   ) : editTarget ? 'Save Changes' : 'Add Item'}

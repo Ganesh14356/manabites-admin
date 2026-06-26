@@ -55,7 +55,7 @@ const DEFAULT_LUNCH = [
   { name: 'Veg Thali',        emoji: '🍽️', imageUrl: '', searchTerm: 'Thali',      subtitle: 'Homestyle Comfort',    timeSlot: 'lunch',     order: 5 },
   { name: 'Dal Fry',          emoji: '🫕', imageUrl: '', searchTerm: 'Dal',         subtitle: 'Light & Filling',      timeSlot: 'lunch',     order: 6 },
   { name: 'Fried Rice',       emoji: '🍚', imageUrl: '', searchTerm: 'Fried Rice',  subtitle: 'Quick Lunch',          timeSlot: 'lunch',     order: 7 },
-  // Evening (4pm–8pm)
+  // Evening (4pm–7pm)
   { name: 'Samosa',           emoji: '🥟', imageUrl: '', searchTerm: 'Samosa',      subtitle: 'Tea Time Snack',       timeSlot: 'evening',   order: 8 },
   { name: 'Pakora',           emoji: '🍤', imageUrl: '', searchTerm: 'Pakora',      subtitle: 'Crispy & Hot',         timeSlot: 'evening',   order: 9 },
   { name: 'Sandwich',         emoji: '🥪', imageUrl: '', searchTerm: 'Sandwich',    subtitle: 'Evening Bite',         timeSlot: 'evening',   order: 10 },
@@ -120,13 +120,10 @@ export default function FoodCategories() {
       async s => {
         const docs = s.docs.map(d => ({ id: d.id, ...d.data() } as LunchItem));
         setLunch(docs);
-        // Seed if empty OR if old items exist without timeSlot (migration)
-        const hasOldItems = docs.length > 0 && docs.every(d => !(d as any).timeSlot);
-        if (docs.length === 0 || hasOldItems) {
+        // Only seed if collection is completely empty
+        if (docs.length === 0) {
           try {
-            const col = collection(db, 'lunchSpecials');
-            for (const d of s.docs) await deleteDoc(d.ref); // clear old
-            for (const item of DEFAULT_LUNCH) await addDoc(col, item);
+            for (const item of DEFAULT_LUNCH) await addDoc(collection(db, 'lunchSpecials'), item);
           } catch { /* silent */ }
         }
         done();
@@ -320,8 +317,8 @@ export default function FoodCategories() {
           {[
             { slot: 'breakfast', label: '🌅 Breakfast', sub: '6am – 11am' },
             { slot: 'lunch',     label: '🍱 Lunch',     sub: '11am – 4pm' },
-            { slot: 'evening',   label: '☕ Evening',   sub: '4pm – 8pm'  },
-            { slot: 'dinner',    label: '🌙 Dinner',    sub: '8pm – 12am' },
+            { slot: 'evening',   label: '☕ Evening',   sub: '4pm – 7pm'  },
+            { slot: 'dinner',    label: '🌙 Dinner',    sub: '7pm – 12am' },
           ].map(({ slot, label, sub }) => {
             const slotItems = (lunch as any[]).filter(i => i.timeSlot === slot);
             return (
@@ -460,8 +457,8 @@ export default function FoodCategories() {
                       {[
                         { value: 'breakfast', label: 'Breakfast', emoji: '🌅', sub: '6am–11am'  },
                         { value: 'lunch',     label: 'Lunch',     emoji: '🍱', sub: '11am–4pm'  },
-                        { value: 'evening',   label: 'Evening',   emoji: '☕', sub: '4pm–8pm'   },
-                        { value: 'dinner',    label: 'Dinner',    emoji: '🌙', sub: '8pm–12am'  },
+                        { value: 'evening',   label: 'Evening',   emoji: '☕', sub: '4pm–7pm'   },
+                        { value: 'dinner',    label: 'Dinner',    emoji: '🌙', sub: '7pm–12am'  },
                       ].map(s => (
                         <button key={s.value} type="button" onClick={() => F('timeSlot', s.value)}
                           className={`flex flex-col items-center py-2 px-1 rounded-xl border-2 text-center transition-all ${
