@@ -39,6 +39,7 @@ const BASE_NAV = [
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },
   { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
+  { name: 'Manual Settlement',   path: '/admin/manual-settlement',    icon: Wallet      },
   { name: 'Cashfree Payouts',    path: '/admin/cashfree-settlements', icon: Banknote    },
   { name: 'Expenses',            path: '/admin/expenses',             icon: Receipt     },
   { name: 'P&L Dashboard',      path: '/admin/pnl',                  icon: TrendingUp  },
