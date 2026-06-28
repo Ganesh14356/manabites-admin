@@ -51,6 +51,7 @@ import SupportChats from './pages/Admin/SupportChats';
 import DirectChat from './pages/Admin/DirectChat';
 import ManaBitesSupport from './pages/Admin/ManaBitesSupport';
 import Expenses from './pages/Admin/Expenses';
+import PnLDashboard from './pages/Admin/PnLDashboard';
 import Fines from './pages/Admin/Fines';
 import ActivityLogs from './pages/Admin/ActivityLogs';
 import GroceryStores from './pages/Admin/GroceryStores';
@@ -130,6 +131,7 @@ export default function App() {
                 <Route path="direct-chat" element={<DirectChat />} />
                 <Route path="support" element={<ManaBitesSupport />} />
                 <Route path="expenses" element={<Expenses />} />
+                <Route path="pnl" element={<PnLDashboard />} />
                 <Route path="fines" element={<Fines />} />
                 <Route path="grocery-stores"   element={<GroceryStores />} />
                 <Route path="grocery-products" element={<GroceryProducts />} />

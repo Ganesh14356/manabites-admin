@@ -41,6 +41,7 @@ const BASE_NAV = [
   { name: 'Daily Settlements',   path: '/admin/settlements',          icon: Calculator  },
   { name: 'Cashfree Payouts',    path: '/admin/cashfree-settlements', icon: Banknote    },
   { name: 'Expenses',            path: '/admin/expenses',             icon: Receipt     },
+  { name: 'P&L Dashboard',      path: '/admin/pnl',                  icon: TrendingUp  },
   { name: 'Fines',               path: '/admin/fines',                icon: Gavel       },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
   { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
