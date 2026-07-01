@@ -43,6 +43,8 @@ const BASE_NAV = [
   { name: 'Cashfree Payouts',    path: '/admin/cashfree-settlements', icon: Banknote    },
   { name: 'Expenses',            path: '/admin/expenses',             icon: Receipt     },
   { name: 'P&L Dashboard',      path: '/admin/pnl',                  icon: TrendingUp  },
+  { name: 'Rapido Monitor',     path: '/admin/rapido-monitor',       icon: Zap         },
+  { name: 'Customer Wallet',    path: '/admin/customer-wallet',      icon: Wallet      },
   { name: 'Fines',               path: '/admin/fines',                icon: Gavel       },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
   { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
