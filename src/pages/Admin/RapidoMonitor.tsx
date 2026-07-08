@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { motion, AnimatePresence } from 'motion/react';
-import { Zap, Clock, AlertTriangle, CheckCircle, XCircle, RefreshCw, TrendingUp, IndianRupee } from 'lucide-react';
+import { Zap, Clock, AlertTriangle, CheckCircle, XCircle, TrendingUp, IndianRupee, Power, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface RapidoOrder {
@@ -15,6 +15,18 @@ interface RapidoOrder {
   total?: number;
   createdAt?: any;
   rapidoCreatedAt?: any;
+  status?: string;
+}
+
+interface ShadowfaxOrder {
+  id: string;
+  restaurantName?: string;
+  customerName?: string;
+  shadowfaxStatus?: string;
+  shadowfaxOrderId?: string;
+  shadowfaxRider?: { name?: string; phone?: string; vehicleNumber?: string };
+  total?: number;
+  createdAt?: any;
   status?: string;
 }
 
@@ -49,9 +61,70 @@ function timeAgo(val: any): string {
 }
 
 export default function RapidoMonitor() {
-  const [activeOrders, setActiveOrders] = useState<RapidoOrder[]>([]);
-  const [todayOrders, setTodayOrders] = useState<RapidoOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [activeOrders, setActiveOrders]   = useState<RapidoOrder[]>([]);
+  const [todayOrders, setTodayOrders]     = useState<RapidoOrder[]>([]);
+  const [sfxActive, setSfxActive]         = useState<ShadowfaxOrder[]>([]);
+  const [sfxToday, setSfxToday]           = useState<ShadowfaxOrder[]>([]);
+  const [loading, setLoading]             = useState(true);
+  const [rapidoEnabled, setRapidoEnabled] = useState<boolean>(true);
+  const [ridersEnabled, setRidersEnabled] = useState<boolean>(true);
+  const [sfxEnabled, setSfxEnabled]       = useState<boolean>(true);
+  const [toggling, setToggling]           = useState(false);
+
+  // Load all 3 settings on mount
+  useEffect(() => {
+    getDoc(doc(db, 'settings', 'rapido')).then(snap => {
+      if (snap.exists()) setRapidoEnabled(snap.data().enabled !== false);
+    });
+    getDoc(doc(db, 'settings', 'riders')).then(snap => {
+      if (snap.exists()) setRidersEnabled(snap.data().enabled !== false);
+    });
+    getDoc(doc(db, 'settings', 'shadowfax')).then(snap => {
+      if (snap.exists()) setSfxEnabled(snap.data().enabled !== false);
+    });
+  }, []);
+
+  const handleToggleRapido = async () => {
+    const next = !rapidoEnabled;
+    setToggling(true);
+    try {
+      await setDoc(doc(db, 'settings', 'rapido'), { enabled: next }, { merge: true });
+      setRapidoEnabled(next);
+      toast.success(`Rapido ${next ? 'enabled ✅' : 'disabled ❌'}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const handleToggleRiders = async () => {
+    const next = !ridersEnabled;
+    setToggling(true);
+    try {
+      await setDoc(doc(db, 'settings', 'riders'), { enabled: next }, { merge: true });
+      setRidersEnabled(next);
+      toast.success(`Own riders ${next ? 'enabled ✅' : 'disabled ❌'}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const handleToggleShadowfax = async () => {
+    const next = !sfxEnabled;
+    setToggling(true);
+    try {
+      await setDoc(doc(db, 'settings', 'shadowfax'), { enabled: next }, { merge: true });
+      setSfxEnabled(next);
+      toast.success(`Shadowfax ${next ? 'enabled ✅' : 'disabled ❌'}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setToggling(false);
+    }
+  };
 
   // Live active Rapido orders
   useEffect(() => {
@@ -82,6 +155,36 @@ export default function RapidoMonitor() {
     return onSnapshot(q, snap => {
       setTodayOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as RapidoOrder)));
     });
+  }, []);
+
+  // Live active Shadowfax orders
+  useEffect(() => {
+    const q = query(
+      collection(db, 'orders'),
+      where('deliverySource', '==', 'shadowfax'),
+      where('shadowfaxStatus', 'in', ['created', 'pending', 'CREATED', 'UNASSIGNED', 'ASSIGNED', 'PICKED_UP', 'OUT_FOR_DELIVERY']),
+      orderBy('createdAt', 'desc'),
+      limit(50),
+    );
+    return onSnapshot(q, snap => {
+      setSfxActive(snap.docs.map(d => ({ id: d.id, ...d.data() } as ShadowfaxOrder)));
+    }, () => {});
+  }, []);
+
+  // Today's Shadowfax orders
+  useEffect(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const q = query(
+      collection(db, 'orders'),
+      where('deliverySource', '==', 'shadowfax'),
+      where('createdAt', '>=', start),
+      orderBy('createdAt', 'desc'),
+      limit(200),
+    );
+    return onSnapshot(q, snap => {
+      setSfxToday(snap.docs.map(d => ({ id: d.id, ...d.data() } as ShadowfaxOrder)));
+    }, () => {});
   }, []);
 
   const handleCancel = async (orderId: string) => {
@@ -115,14 +218,71 @@ export default function RapidoMonitor() {
           </h1>
           <p className="text-sm text-gray-400 mt-0.5">Live Rapido deliveries — real time tracking</p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-400">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-          </span>
-          Live
+        <div className="flex items-center gap-3">
+          {/* Own Riders On/Off Toggle */}
+          <button
+            onClick={handleToggleRiders}
+            disabled={toggling}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all shadow ${
+              ridersEnabled
+                ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                : 'bg-gray-400 hover:bg-gray-500 text-white'
+            } disabled:opacity-60`}
+          >
+            <Power size={16} />
+            Riders {ridersEnabled ? 'ON' : 'OFF'}
+          </button>
+          {/* Rapido On/Off Toggle */}
+          <button
+            onClick={handleToggleRapido}
+            disabled={toggling}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all shadow ${
+              rapidoEnabled
+                ? 'bg-green-500 hover:bg-green-600 text-white'
+                : 'bg-red-500 hover:bg-red-600 text-white'
+            } disabled:opacity-60`}
+          >
+            <Power size={16} />
+            Rapido {rapidoEnabled ? 'ON' : 'OFF'}
+          </button>
+          <div className="flex items-center gap-2 text-xs font-bold text-gray-400">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+            </span>
+            Live
+          </div>
         </div>
       </div>
+
+      {/* Status banners */}
+      {!ridersEnabled && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
+          <XCircle size={20} className="text-blue-500 shrink-0" />
+          <div>
+            <p className="font-bold text-blue-700">Own riders are disabled</p>
+            <p className="text-sm text-blue-500">Orders will skip rider dispatch and go directly to Rapido.</p>
+          </div>
+        </div>
+      )}
+      {!rapidoEnabled && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+          <XCircle size={20} className="text-red-500 shrink-0" />
+          <div>
+            <p className="font-bold text-red-700">Rapido is disabled</p>
+            <p className="text-sm text-red-500">New orders will NOT be sent to Rapido. Enable to resume deliveries.</p>
+          </div>
+        </div>
+      )}
+      {!ridersEnabled && !rapidoEnabled && (
+        <div className="bg-orange-50 border border-orange-300 rounded-xl p-4 flex items-center gap-3">
+          <AlertTriangle size={20} className="text-orange-500 shrink-0" />
+          <div>
+            <p className="font-bold text-orange-700">⚠️ Both delivery methods are OFF!</p>
+            <p className="text-sm text-orange-600">No deliveries will happen. Enable at least one to process orders.</p>
+          </div>
+        </div>
+      )}
 
       {/* Today summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

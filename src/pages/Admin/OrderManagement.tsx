@@ -74,6 +74,10 @@ export default function OrderManagement() {
   const [assigningRider, setAssigningRider] = useState(false);
   const [selectedRiderId, setSelectedRiderId] = useState('');
 
+  // Rapido manual booking state
+  const [rapidoForm, setRapidoForm] = useState({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '' });
+  const [savingRapido, setSavingRapido] = useState(false);
+
   useEffect(() => {
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snapshot => {
@@ -204,6 +208,50 @@ export default function OrderManagement() {
       toast.success('Order escalated — support team notified');
     } catch {
       toast.error('Failed to escalate');
+    }
+  };
+
+  const handleSaveRapidoDetails = async () => {
+    if (!selectedOrder) return;
+    setSavingRapido(true);
+    try {
+      const updates: any = {
+        deliverySource: 'rapido_manual',
+        updatedAt: Timestamp.now(),
+      };
+      if (rapidoForm.pickupOtp)   updates.rapidoPickupOtp   = rapidoForm.pickupOtp.trim();
+      if (rapidoForm.captainName || rapidoForm.captainPhone) {
+        updates.rapidoRider = {
+          name:  rapidoForm.captainName.trim()  || 'Rapido Captain',
+          phone: rapidoForm.captainPhone.trim() || null,
+        };
+      }
+      if (rapidoForm.trackingUrl) updates.rapidoTrackingUrl = rapidoForm.trackingUrl.trim();
+      // Auto set out_for_delivery when captain details saved
+      if (rapidoForm.captainName || rapidoForm.captainPhone) {
+        updates.status = 'out_for_delivery';
+        updates.pickedUpAt = Timestamp.now();
+      }
+      await updateDoc(doc(db, 'orders', selectedOrder.id), updates);
+      toast.success('Rapido details saved — restaurant + customer notified ✅');
+      setRapidoForm({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '' });
+    } catch {
+      toast.error('Failed to save Rapido details');
+    } finally {
+      setSavingRapido(false);
+    }
+  };
+
+  const handleMarkDelivered = async (orderId: string) => {
+    try {
+      await updateDoc(doc(db, 'orders', orderId), {
+        status:      'delivered',
+        deliveredAt: Timestamp.now(),
+        updatedAt:   Timestamp.now(),
+      });
+      toast.success('Order marked as Delivered ✅');
+    } catch {
+      toast.error('Failed to mark delivered');
     }
   };
 
@@ -498,6 +546,115 @@ export default function OrderManagement() {
                     )}
                   </div>
                 </div>
+
+                {/* ── Rapido Manual Booking ─────────────────────────── */}
+                {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
+                  <div className="border border-yellow-200 bg-yellow-50 rounded-2xl p-4 space-y-3">
+                    <p className="text-xs font-black text-yellow-700 uppercase tracking-widest">🛵 Rapido Manual Booking</p>
+
+                    {/* Maps + Copy */}
+                    <div className="space-y-2">
+                      {(selectedOrder as any).restaurantLat && (
+                        <a
+                          href={`https://maps.google.com/?q=${(selectedOrder as any).restaurantLat},${(selectedOrder as any).restaurantLng}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-white rounded-xl px-3 py-2 border border-blue-100"
+                        >
+                          <MapPin className="w-3 h-3" /> 📍 Restaurant Location (Pickup)
+                        </a>
+                      )}
+                      {(selectedOrder as any).customerLat && (
+                        <a
+                          href={`https://maps.google.com/?q=${(selectedOrder as any).customerLat},${(selectedOrder as any).customerLng}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-xs font-bold text-green-600 bg-white rounded-xl px-3 py-2 border border-green-100"
+                        >
+                          <MapPin className="w-3 h-3" /> 🏠 Customer Location (Drop)
+                        </a>
+                      )}
+                      <button
+                        onClick={() => {
+                          const text = `Pickup: ${selectedOrder.restaurantName}, ${(selectedOrder as any).restaurantAddress || ''} | Ph: ${(selectedOrder as any).restaurantPhone || ''}
+Drop: ${selectedOrder.customerName}, ${selectedOrder.deliveryAddress} | Ph: ${(selectedOrder as any).customerPhone || ''}`;
+                          navigator.clipboard.writeText(text).then(() => toast.success('Addresses copied! Paste in Rapido app'));
+                        }}
+                        className="w-full py-2 bg-yellow-400 text-black font-black rounded-xl text-xs hover:bg-yellow-500 flex items-center justify-center gap-2"
+                      >
+                        📋 Copy Addresses + Open Rapido
+                      </button>
+                      <a
+                        href="https://rapido.bike"
+                        target="_blank" rel="noopener noreferrer"
+                        className="block w-full py-2 bg-black text-white font-black rounded-xl text-xs text-center hover:bg-gray-900"
+                      >
+                        🛵 Open Rapido App / Website
+                      </a>
+                    </div>
+
+                    {/* After booking — enter captain details */}
+                    <div className="border-t border-yellow-200 pt-3 space-y-2">
+                      <p className="text-[10px] font-black text-yellow-600 uppercase">After Booking — Enter Details:</p>
+                      <input
+                        type="text" inputMode="numeric" maxLength={6}
+                        placeholder="Pickup OTP (e.g. 4521)"
+                        value={rapidoForm.pickupOtp}
+                        onChange={e => setRapidoForm(f => ({ ...f, pickupOtp: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm font-mono font-black bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Captain Name"
+                        value={rapidoForm.captainName}
+                        onChange={e => setRapidoForm(f => ({ ...f, captainName: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Captain Phone"
+                        value={rapidoForm.captainPhone}
+                        onChange={e => setRapidoForm(f => ({ ...f, captainPhone: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="url"
+                        placeholder="Tracking URL (optional)"
+                        value={rapidoForm.trackingUrl}
+                        onChange={e => setRapidoForm(f => ({ ...f, trackingUrl: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <button
+                        onClick={handleSaveRapidoDetails}
+                        disabled={savingRapido || (!rapidoForm.pickupOtp && !rapidoForm.captainName)}
+                        className="w-full py-2.5 bg-green-500 text-white font-black rounded-xl text-sm hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {savingRapido ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        Save & Notify Restaurant + Customer
+                      </button>
+                    </div>
+
+                    {/* Mark Delivered */}
+                    {selectedOrder.status === 'out_for_delivery' && (
+                      <button
+                        onClick={() => handleMarkDelivered(selectedOrder.id)}
+                        className="w-full py-2.5 bg-brand text-white font-black rounded-xl text-sm hover:bg-orange-600 flex items-center justify-center gap-2"
+                      >
+                        ✅ Mark Delivered
+                      </button>
+                    )}
+
+                    {/* Show saved Rapido info */}
+                    {(selectedOrder as any).rapidoPickupOtp && (
+                      <div className="bg-white rounded-xl px-3 py-2 text-xs font-bold text-gray-700 border border-yellow-100">
+                        🔑 Pickup OTP: <span className="font-mono text-lg text-yellow-700">{(selectedOrder as any).rapidoPickupOtp}</span>
+                      </div>
+                    )}
+                    {(selectedOrder as any).rapidoRider?.name && (
+                      <div className="bg-white rounded-xl px-3 py-2 text-xs font-bold text-gray-700 border border-yellow-100">
+                        🛵 Captain: {(selectedOrder as any).rapidoRider.name} · {(selectedOrder as any).rapidoRider.phone || '—'}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Items */}
                 <div>
