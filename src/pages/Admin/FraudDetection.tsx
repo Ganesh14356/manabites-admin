@@ -10,6 +10,7 @@ interface FlaggedOrder {
   id: string;
   reason: string;
   severity: 'high' | 'medium' | 'low';
+  customerId?: string;
   customerPhone?: string;
   customerName?: string;
   restaurantName?: string;
@@ -50,12 +51,12 @@ function FlagCard({ order }: { order: FlaggedOrder }) {
         fraudNote: note || null,
         fraudReviewedAt: Date.now(),
       });
-      if (type === 'ban' && order.customerPhone) {
-        await updateDoc(doc(db, 'users', order.customerPhone), {
+      if (type === 'ban' && order.customerId) {
+        await updateDoc(doc(db, 'users', order.customerId), {
           isBanned: true,
           banReason: note || 'Fraud detection',
           bannedAt: Date.now(),
-        }).catch(() => {});
+        });
       }
       toast.success(type === 'ban' ? 'User banned and order flagged' : 'Flag cleared — order marked safe');
       setAction(null);

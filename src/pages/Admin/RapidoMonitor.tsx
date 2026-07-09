@@ -191,10 +191,17 @@ export default function RapidoMonitor() {
     if (!window.confirm('Rapido order cancel cheyyanaa? Refund issue avutundi.')) return;
     try {
       await updateDoc(doc(db, 'orders', orderId), {
+        status: 'cancelled',
         rapidoStatus: 'cancelled',
         rapidoCancelledAt: Date.now(),
         cancelledBy: 'admin',
       });
+      // Trigger auto-refund (fire-and-forget; errors logged server-side)
+      fetch('/api/auto-refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      }).catch(() => {});
       toast.success('Order cancelled — refund processing');
     } catch (e: any) {
       toast.error(e.message);

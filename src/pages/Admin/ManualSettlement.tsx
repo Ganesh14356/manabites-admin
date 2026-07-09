@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   collection, getDocs, query, where, orderBy, limit,
-  addDoc, updateDoc, doc, serverTimestamp, getDoc,
+  addDoc, updateDoc, doc, serverTimestamp, getDoc, runTransaction,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -135,17 +135,19 @@ export default function ManualSettlement() {
         createdAt:    serverTimestamp(),
       });
 
-      // Deduct from wallet balance
+      // Deduct from wallet balance — atomic transaction to prevent race with concurrent admins
       const walletRef = doc(db, 'wallets', selected.id);
-      const walletSnap = await getDoc(walletRef);
-      if (walletSnap.exists()) {
-        const currentBal = walletSnap.data()?.balance ?? 0;
-        await updateDoc(walletRef, {
-          balance: Math.max(0, currentBal - amt),
-          lastWithdrawnAt: now,
-          lastWithdrawnAmount: amt,
-        });
-      }
+      await runTransaction(db, async (txn) => {
+        const walletSnap = await txn.get(walletRef);
+        if (walletSnap.exists()) {
+          const currentBal = walletSnap.data()?.balance ?? 0;
+          txn.update(walletRef, {
+            balance: Math.max(0, currentBal - amt),
+            lastWithdrawnAt: now,
+            lastWithdrawnAmount: amt,
+          });
+        }
+      });
 
       // Wallet transaction log
       await addDoc(collection(db, 'walletTransactions'), {

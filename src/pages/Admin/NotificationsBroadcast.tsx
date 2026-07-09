@@ -55,7 +55,7 @@ export default function NotificationsBroadcast() {
     }, () => setHistoryLoading(false));
   }, []);
 
-  const getRecipients = async (): Promise<{ uid: string }[]> => {
+  const getRecipients = async (): Promise<{ uid: string; isRider?: boolean }[]> => {
     const snap_customers = audience === 'all_customers' || audience === 'all'
       ? await getDocs(collection(db, 'users')) : null;
     const snap_riders = audience === 'all_riders' || audience === 'all'
@@ -63,11 +63,22 @@ export default function NotificationsBroadcast() {
     const snap_restaurants = audience === 'all_restaurants' || audience === 'all'
       ? await getDocs(collection(db, 'restaurants')) : null;
 
-    const uids = new Set<string>();
-    snap_customers?.docs.forEach(d => { if (d.data().uid || d.id) uids.add(d.data().uid || d.id); });
-    snap_riders?.docs.forEach(d => { if (d.data().uid || d.id) uids.add(d.data().uid || d.id); });
-    snap_restaurants?.docs.forEach(d => { const oid = d.data().ownerId; if (oid) uids.add(oid); });
-    return Array.from(uids).map(uid => ({ uid }));
+    const result: { uid: string; isRider?: boolean }[] = [];
+    const seen = new Set<string>();
+
+    snap_customers?.docs.forEach(d => {
+      const uid = d.data().uid || d.id;
+      if (uid && !seen.has(uid)) { seen.add(uid); result.push({ uid }); }
+    });
+    snap_riders?.docs.forEach(d => {
+      const uid = d.data().uid || d.id;
+      if (uid && !seen.has(uid)) { seen.add(uid); result.push({ uid, isRider: true }); }
+    });
+    snap_restaurants?.docs.forEach(d => {
+      const oid = d.data().ownerId;
+      if (oid && !seen.has(oid)) { seen.add(oid); result.push({ uid: oid }); }
+    });
+    return result;
   };
 
   const handleSend = async () => {
@@ -84,16 +95,27 @@ export default function NotificationsBroadcast() {
       const CHUNK = 50;
       for (let i = 0; i < recipients.length; i += CHUNK) {
         await Promise.all(
-          recipients.slice(i, i + CHUNK).map(r =>
-            addDoc(collection(db, 'notifications'), {
+          recipients.slice(i, i + CHUNK).map(r => {
+            // Rider app queries 'riderNotifications' by 'riderId'; others use 'notifications' by 'userId'
+            if (r.isRider) {
+              return addDoc(collection(db, 'riderNotifications'), {
+                riderId:   r.uid,
+                title:     title.trim(),
+                body:      message.trim(),
+                type:      'broadcast',
+                read:      false,
+                createdAt: Date.now(),
+              });
+            }
+            return addDoc(collection(db, 'notifications'), {
               userId:    r.uid,
               title:     title.trim(),
               message:   message.trim(),
               type:      'broadcast',
               isRead:    false,
               createdAt: serverTimestamp(),
-            })
-          )
+            });
+          })
         );
       }
 

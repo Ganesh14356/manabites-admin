@@ -68,9 +68,7 @@ export default function CustomerWalletAdmin() {
     setSubmitting(true);
     try {
       const change = mode === 'credit' ? amt : -amt;
-      // Update wallet
-      await updateDoc(doc(db, 'wallets', selected.id), { balance: increment(change), updatedAt: Date.now() });
-      // Log transaction
+      // Write transaction log first — if wallet update fails, log exists as evidence but balance is unchanged
       await addDoc(collection(db, 'walletTransactions'), {
         userId:    selected.id,
         amount:    change,
@@ -79,6 +77,8 @@ export default function CustomerWalletAdmin() {
         addedBy:   'admin',
         createdAt: Date.now(),
       });
+      // Update wallet (increment is atomic server-side)
+      await updateDoc(doc(db, 'wallets', selected.id), { balance: increment(change), updatedAt: Date.now() });
       // Admin audit log
       await addDoc(collection(db, 'adminWalletActions'), {
         customerId:   selected.id,

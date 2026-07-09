@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
-  collection, doc, setDoc, updateDoc, onSnapshot,
+  collection, doc, setDoc, updateDoc, onSnapshot, writeBatch,
   query, orderBy, getDocs, where, increment, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -134,21 +134,23 @@ export default function Fines() {
   const handleDeduct = async (fine: Fine) => {
     setProcessing(fine.id);
     try {
-      // Deduct from rider earnings or restaurant outstanding
+      // Atomic batch: deduct earnings and mark fine 'deducted' together
+      const batch = writeBatch(db);
       if (fine.targetType === 'rider') {
-        await updateDoc(doc(db, 'riders', fine.targetId), {
+        batch.update(doc(db, 'riders', fine.targetId), {
           earnings:      increment(-fine.amount),
           totalEarnings: increment(-fine.amount),
         });
       } else {
-        await setDoc(doc(db, 'restaurants', fine.targetId), {
+        batch.set(doc(db, 'restaurants', fine.targetId), {
           outstandingFines: increment(fine.amount),
         }, { merge: true });
       }
-      await updateDoc(doc(db, 'fines', fine.id), {
+      batch.update(doc(db, 'fines', fine.id), {
         status:     'deducted',
         deductedAt: serverTimestamp(),
       });
+      await batch.commit();
       toast.success(`₹${fine.amount} deducted from ${fine.targetName}`);
     } catch {
       toast.error('Deduction failed');

@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { OrderId } from '../../components/OrderId';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  collection, onSnapshot, query, where, doc, updateDoc,
-  addDoc, serverTimestamp, orderBy, writeBatch, getDoc,
+  collection, onSnapshot, query, where, doc, updateDoc, setDoc,
+  addDoc, serverTimestamp, orderBy, writeBatch, getDoc, increment,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { RefreshCw, CheckCircle, Clock, Search, X, AlertTriangle, DollarSign } from 'lucide-react';
@@ -158,6 +158,26 @@ export default function RefundManagement() {
       });
 
       const isOriginal = selected.refundMethod === 'original';
+
+      // For wallet refunds (non-original), credit the customer wallet
+      if (!isOriginal) {
+        const walletRef = doc(db, 'wallets', selected.customerId);
+        const walletSnap = await getDoc(walletRef);
+        if (walletSnap.exists()) {
+          await updateDoc(walletRef, { balance: increment(amt), updatedAt: serverTimestamp() });
+        } else {
+          await setDoc(walletRef, { balance: amt, userId: selected.customerId, updatedAt: serverTimestamp() });
+        }
+        await addDoc(collection(db, 'walletTransactions'), {
+          userId:    selected.customerId,
+          orderId:   selected.id,
+          amount:    amt,
+          type:      'refund',
+          reason:    'Order refund',
+          createdAt: serverTimestamp(),
+        });
+      }
+
       await addDoc(collection(db, 'notifications'), {
         userId:    selected.customerId,
         title:    '💰 Refund Issued',
@@ -217,7 +237,7 @@ export default function RefundManagement() {
         approvalStatus: 'under_review',
         suspendedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      }).catch(() => Promise.resolve()); // rider doc may be keyed by phone
+      });
       toast.success(`Rider temporarily suspended and moved to review queue`);
     } catch (err: any) {
       toast.error('Failed to suspend rider: ' + err.message);

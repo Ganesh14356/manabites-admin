@@ -19,7 +19,7 @@ export default function ProtectedRoute() {
     return <Navigate to="/login" replace />;
   }
 
-  if (profile && profile.role !== 'admin') {
+  if (!profile || profile.role !== 'admin') {
     return <Navigate to="/unauthorized" replace />;
   }
 

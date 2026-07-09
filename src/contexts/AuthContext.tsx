@@ -56,8 +56,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             if (snap.exists()) {
               setProfile(snap.data() as UserProfile);
             } else {
-              // New user not in Firestore yet (e.g. Google sign-in first time)
-              setProfile({ role: 'admin', email: currentUser.email ?? '' });
+              // User exists in Firebase Auth but has no Firestore doc — deny access
+              setProfile(null);
             }
             setLoading(false);
           });
