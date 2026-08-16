@@ -2,9 +2,19 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { OrderId } from '../../components/OrderId';
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
 import L from 'leaflet';
+
+// Auto-fits map to show all visible markers
+function AutoFitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points.length === 0) return;
+    const bounds = L.latLngBounds(points);
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+  }, [points.length]); // re-fit when number of points changes
+  return null;
+}
 
 const restaurantIcon = L.divIcon({
   className: '',
@@ -161,8 +171,21 @@ export default function LiveOrdersMap() {
     });
   }, [enrichedOrders]);
 
+  // All visible marker points for auto-fit bounds
+  const allVisiblePoints = useMemo((): [number, number][] => {
+    const pts: [number, number][] = [];
+    filteredOrders.forEach(o => {
+      if (o.restaurantLat && o.restaurantLng) pts.push([o.restaurantLat, o.restaurantLng]);
+      const cLat = o.deliveryAddress?.lat ?? o.deliveryLat;
+      const cLng = o.deliveryAddress?.lng ?? o.deliveryLng;
+      if (cLat && cLng) pts.push([cLat as number, cLng as number]);
+    });
+    riders.forEach(r => { if (r.lat && r.lng) pts.push([r.lat, r.lng]); });
+    return pts;
+  }, [filteredOrders, riders]);
+
   return (
-    <div className="flex flex-col h-full gap-4 p-4 md:p-6">
+    <div className="flex flex-col gap-4 p-4 md:p-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
@@ -223,17 +246,18 @@ export default function LiveOrdersMap() {
 
       <div className="flex gap-4 flex-1 min-h-0">
         {/* Map */}
-        <div className="flex-1 rounded-2xl overflow-hidden shadow-sm border border-gray-200" style={{ minHeight: 500 }}>
+        <div className="rounded-2xl overflow-hidden shadow-sm border border-gray-200" style={{ height: '560px' }}>
           <MapContainer
             center={[17.4483, 78.3915]}
             zoom={12}
-            style={{ height: '100%', width: '100%', minHeight: 500 }}
+            style={{ height: '100%', width: '100%' }}
             scrollWheelZoom
           >
             <TileLayer
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             />
+            <AutoFitBounds points={allVisiblePoints} />
 
             {/* Heat map layer (rendered under regular markers) */}
             {heatMode && heatMapPoints.map((point, idx) => {
@@ -327,7 +351,7 @@ export default function LiveOrdersMap() {
         </div>
 
         {/* Order sidebar */}
-        <div className="w-72 overflow-y-auto space-y-2 flex-shrink-0">
+        <div className="w-72 overflow-y-auto space-y-2 flex-shrink-0" style={{ maxHeight: '560px' }}>
           <p className="text-xs font-black text-gray-400 uppercase tracking-widest px-1">
             Active Orders ({enrichedOrders.length})
           </p>

@@ -63,6 +63,10 @@ const schema = z.object({
 
   referralMilestoneBonus: z.string()
     .refine(v => !isNaN(Number(v)) && Number(v) >= 0, 'Must be 0 or more'),
+
+  rapidoSurcharge: z.string()
+    .refine(v => !isNaN(Number(v)) && Number(v) >= 0, 'Must be 0 or more')
+    .refine(v => Number(v) <= 200, 'Max ₹200 surcharge'),
 });
 
 const PREVIEW_DISTANCES = [1, 3, 5, 8, 12, 15];
@@ -103,6 +107,7 @@ export default function DeliveryFeeSettings() {
         taxPercent: (settings.taxPercent ?? 5).toString(),
         referralBonus: (settings.referralBonus ?? 10).toString(),
         referralMilestoneBonus: (settings.referralMilestoneBonus ?? 50).toString(),
+        rapidoSurcharge: (settings.rapidoSurcharge ?? 20).toString(),
       });
     }
   }, [settings, reset]);
@@ -133,6 +138,7 @@ export default function DeliveryFeeSettings() {
         taxPercent: Number(data.taxPercent),
         referralBonus: Number(data.referralBonus),
         referralMilestoneBonus: Number(data.referralMilestoneBonus),
+        rapidoSurcharge: Number(data.rapidoSurcharge),
       },
       user.uid
     );
@@ -482,6 +488,58 @@ export default function DeliveryFeeSettings() {
               </div>
             </motion.div>
 
+            {/* ── Rapido Surcharge ──────────────────────────────── */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.185 }}
+              className="bg-yellow-50 border border-yellow-200 rounded-2xl p-5"
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 bg-yellow-200 rounded-xl flex items-center justify-center text-lg">
+                  🟡
+                </div>
+                <div>
+                  <h2 className="font-bold text-gray-800 text-sm">Rapido Delivery Surcharge</h2>
+                  <p className="text-xs text-gray-500">Extra charge when no ManaBites rider is within 2km</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Rapido Surcharge (₹)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">₹</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      {...register('rapidoSurcharge')}
+                      className={`input-field pl-8 bg-white ${errors.rapidoSurcharge ? 'border-red-400' : 'border-yellow-300'}`}
+                      placeholder="20"
+                    />
+                  </div>
+                  {errors.rapidoSurcharge && <p className="text-red-500 text-xs mt-1">{(errors.rapidoSurcharge as any)?.message}</p>}
+                  <p className="text-gray-400 text-xs mt-1">Added on top of normal delivery fee for Rapido orders</p>
+                </div>
+                <div className="bg-white rounded-xl border border-yellow-200 p-3 flex flex-col justify-center">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Example (3km order)</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🛵 ManaBites rider</span>
+                      <span className="font-black text-green-600">₹{10 + 3 * 12}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🟡 Rapido delivery</span>
+                      <span className="font-black text-yellow-700">₹{10 + 3 * 12} + ₹{Number(watchedValues.rapidoSurcharge) || 20} = ₹{10 + 3 * 12 + (Number(watchedValues.rapidoSurcharge) || 20)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -646,34 +704,37 @@ export default function DeliveryFeeSettings() {
                     </div>
                   </div>
 
-                  <div className={`rounded-xl p-4 mb-4 ${
-                    !previewFee.isWithinRange ? 'bg-red-50 border border-red-200' :
-                    previewFee.isFree ? 'bg-green-50 border border-green-200' :
-                    'bg-blue-50 border border-blue-200'
-                  }`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-semibold text-gray-700">Delivery Fee</span>
-                      <motion.span
-                        key={previewFee.totalFee}
-                        initial={{ scale: 1.2 }}
-                        animate={{ scale: 1 }}
-                        className={`text-xl font-black ${
+                  <div className="space-y-2 mb-4">
+                    <div className={`rounded-xl p-3 ${
+                      !previewFee.isWithinRange ? 'bg-red-50 border border-red-200' :
+                      previewFee.isFree ? 'bg-green-50 border border-green-200' :
+                      'bg-blue-50 border border-blue-200'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-600">🛵 ManaBites rider</span>
+                        <span className={`text-base font-black ${
                           !previewFee.isWithinRange ? 'text-red-600' :
-                          previewFee.isFree ? 'text-green-600' :
-                          'text-blue-700'
-                        }`}
-                      >
-                        {!previewFee.isWithinRange ? '❌ Out of range' :
-                         previewFee.isFree ? 'FREE 🎉' :
-                         `₹${previewFee.totalFee}`}
-                      </motion.span>
+                          previewFee.isFree ? 'text-green-600' : 'text-blue-700'
+                        }`}>
+                          {!previewFee.isWithinRange ? '❌ Out of range' :
+                           previewFee.isFree ? 'FREE 🎉' : `₹${previewFee.totalFee}`}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">{previewFee.breakdown}</p>
                     </div>
-                    <p className="text-xs text-gray-500">{previewFee.breakdown}</p>
-                    {!previewFee.isFree && previewFee.freeIn > 0 && previewFee.isWithinRange && (
-                      <p className="text-xs text-green-600 mt-1.5 font-medium">
-                        🚀 Add ₹{previewFee.freeIn} more for free delivery
+                    <div className="rounded-xl p-3 bg-yellow-50 border border-yellow-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-600">🟡 Rapido delivery</span>
+                        <span className="text-base font-black text-yellow-700">
+                          {!previewFee.isWithinRange ? '❌ Out of range' :
+                           previewFee.isFree ? `₹${Number(watchedValues.rapidoSurcharge) || 20}` :
+                           `₹${previewFee.totalFee + (Number(watchedValues.rapidoSurcharge) || 20)}`}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        +₹{Number(watchedValues.rapidoSurcharge) || 20} Rapido surcharge
                       </p>
-                    )}
+                    </div>
                   </div>
 
                   <div>

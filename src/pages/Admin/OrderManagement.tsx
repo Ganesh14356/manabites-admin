@@ -293,12 +293,18 @@ export default function OrderManagement() {
       if (rapidoForm.pickupOtp)   updates.pickupOtp = rapidoForm.pickupOtp.trim();
       if (rapidoForm.deliveryOtp) updates.deliveryOtp     = rapidoForm.deliveryOtp.trim();
       if (rapidoForm.captainName || rapidoForm.captainPhone) {
-        updates.rapidoRider = {
-          name:  rapidoForm.captainName.trim()  || 'Rapido Captain',
-          phone: rapidoForm.captainPhone.trim() || null,
-        };
+        const captainName  = rapidoForm.captainName.trim()  || 'Rapido Captain';
+        const captainPhone = rapidoForm.captainPhone.trim() || null;
+        updates.rapidoRider = { name: captainName, phone: captainPhone };
+        // Flat fields — these are what the customer app reads
+        updates.riderName  = captainName;
+        updates.riderPhone = captainPhone;
       }
-      if (rapidoForm.trackingUrl) updates.rapidoTrackingUrl = rapidoForm.trackingUrl.trim();
+      if (rapidoForm.trackingUrl) {
+        const trackingUrl = rapidoForm.trackingUrl.trim();
+        updates.rapidoTrackingUrl = trackingUrl;
+        updates.trackingUrl = trackingUrl; // flat field read by customer app
+      }
       // Auto set out_for_delivery when captain details saved
       if (rapidoForm.captainName || rapidoForm.captainPhone) {
         updates.status = 'out_for_delivery';

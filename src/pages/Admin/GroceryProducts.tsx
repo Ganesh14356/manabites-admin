@@ -9,7 +9,9 @@ import { db } from '../../firebase';
 import {
   Plus, Edit2, Trash2, Check, X,
   ToggleLeft, ToggleRight, Package, Tag, Percent,
+  Camera, Link as LinkIcon,
 } from 'lucide-react';
+import { uploadToImgBB } from '../../lib/imgbb';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -112,6 +114,11 @@ export default function GroceryProducts() {
   const [editTarget, setEditTarget] = useState<GroceryProduct | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [imgFile, setImgFile] = useState<File | null>(null);
+  const [imgPreview, setImgPreview] = useState('');
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlInput, setUrlInput] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -131,9 +138,38 @@ export default function GroceryProducts() {
     return products.filter(p => p.category === activeCategory);
   }, [products, activeCategory]);
 
+  const resetImgState = () => {
+    setImgFile(null);
+    setImgPreview('');
+    setShowUrlInput(false);
+    setUrlInput('');
+  };
+
+  useEffect(() => {
+    if (!showModal) return;
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            setImgFile(file);
+            setImgPreview(URL.createObjectURL(file));
+            setShowUrlInput(false);
+          }
+          break;
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [showModal]);
+
   const openAdd = () => {
     setEditTarget(null);
     setForm(EMPTY_FORM);
+    resetImgState();
     setShowModal(true);
   };
 
@@ -150,6 +186,8 @@ export default function GroceryProducts() {
       stock: String(product.stock),
       storeId: product.storeId || '',
     });
+    resetImgState();
+    if (product.image) setImgPreview(product.image);
     setShowModal(true);
   };
 
@@ -165,6 +203,12 @@ export default function GroceryProducts() {
 
     setSaving(true);
     try {
+      let imageUrl = form.image.trim();
+      if (imgFile) {
+        setUploading(true);
+        try { imageUrl = await uploadToImgBB(imgFile); } finally { setUploading(false); }
+      }
+
       const payload = {
         name: form.name.trim(),
         category: form.category,
@@ -172,7 +216,7 @@ export default function GroceryProducts() {
         price,
         mrp,
         unit: form.unit.trim(),
-        image: form.image.trim(),
+        image: imageUrl,
         stock,
         storeId: form.storeId.trim(),
         updatedAt: serverTimestamp(),
@@ -616,28 +660,74 @@ export default function GroceryProducts() {
                   </div>
                 </div>
 
-                {/* Image URL */}
+                {/* Image Upload */}
                 <div>
                   <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1.5">
-                    Image URL (optional)
+                    Product Image (optional)
                   </label>
-                  <input
-                    value={form.image}
-                    onChange={setField('image')}
-                    placeholder="https://..."
-                    className="w-full rounded-xl border-2 border-gray-100 focus:border-orange-400 px-4 py-3 text-sm font-medium text-gray-800 focus:outline-none transition-colors"
-                  />
-                  {form.image && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <img
-                        src={form.image}
-                        alt="preview"
-                        className="w-10 h-10 rounded-lg object-cover border border-gray-100"
-                        onError={e => { (e.target as HTMLImageElement).src = ''; }}
-                      />
-                      <span className="text-xs text-gray-400">Preview</span>
+
+                  {imgPreview ? (
+                    <div className="relative mb-2 inline-block">
+                      <img src={imgPreview} alt="preview" className="w-20 h-20 rounded-xl object-cover border border-gray-100" />
+                      <button
+                        type="button"
+                        onClick={() => { setImgFile(null); setImgPreview(''); setForm(prev => ({ ...prev, image: '' })); }}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow"
+                      >
+                        <X className="w-3 h-3 text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <label className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl border-2 border-dashed border-gray-200 hover:border-orange-400 cursor-pointer transition-colors text-xs font-bold text-gray-400 hover:text-orange-500">
+                        <Camera className="w-4 h-4" />
+                        Upload / Paste
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) { setImgFile(file); setImgPreview(URL.createObjectURL(file)); setShowUrlInput(false); }
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowUrlInput(v => !v)}
+                        className={`flex items-center gap-1.5 h-10 px-3 rounded-xl border-2 text-xs font-bold transition-colors ${
+                          showUrlInput ? 'border-orange-400 text-orange-500' : 'border-gray-200 text-gray-400 hover:border-orange-400 hover:text-orange-500'
+                        }`}
+                      >
+                        <LinkIcon className="w-4 h-4" /> URL
+                      </button>
                     </div>
                   )}
+
+                  {showUrlInput && !imgPreview && (
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        value={urlInput}
+                        onChange={e => setUrlInput(e.target.value)}
+                        placeholder="https://i.ibb.co/..."
+                        className="flex-1 rounded-xl border-2 border-gray-100 focus:border-orange-400 px-3 py-2 text-sm text-gray-800 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (urlInput.trim()) {
+                            setImgPreview(urlInput.trim());
+                            setForm(prev => ({ ...prev, image: urlInput.trim() }));
+                          }
+                        }}
+                        className="px-3 py-2 bg-orange-500 text-white text-xs font-bold rounded-xl"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  )}
+
+                  <p className="text-[10px] text-gray-400 mt-1.5">Ctrl+V to paste an image from clipboard</p>
                 </div>
 
                 {/* Store ID (optional) */}
@@ -665,10 +755,12 @@ export default function GroceryProducts() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || uploading}
                   className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
                 >
-                  {saving ? (
+                  {uploading ? (
+                    <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Uploading…</>
+                  ) : saving ? (
                     <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
                     <><Check className="w-4 h-4" /> {editTarget ? 'Update Product' : 'Save Product'}</>

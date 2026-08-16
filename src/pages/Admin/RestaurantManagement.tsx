@@ -126,7 +126,8 @@ const addRestaurantSchema = z.object({
   bankAccount: z.string().optional(),
   accountHolderName: z.string().optional(),
   ifscCode: z.string().optional(),
-  openingHours: z.string().optional(),
+  openTime: z.string().optional(),
+  closeTime: z.string().optional(),
 });
 
 const editRestaurantSchema = z.object({
@@ -138,7 +139,9 @@ const editRestaurantSchema = z.object({
   bankAccount: z.string().optional(),
   accountHolderName: z.string().optional(),
   ifscCode: z.string().optional(),
-  openingHours: z.string().optional(),
+  openTime: z.string().optional(),
+  closeTime: z.string().optional(),
+  loginId: z.string().regex(/^[a-z0-9_]{3,30}$/, 'Only lowercase letters, numbers, underscore (3–30 chars)').optional().or(z.literal('')),
 });
 
 type AddFormData = z.infer<typeof addRestaurantSchema>;
@@ -347,7 +350,10 @@ function AddRestaurantModal({
         locationName: locationCoords.locationName ?? null,
         fssai: data.fssai || '',
         bankAccount: data.bankAccount || '',
-        openingHours: data.openingHours || '',
+        openTime:  data.openTime  || '',
+        closeTime: data.closeTime || '',
+        openingHours: data.openTime && data.closeTime
+          ? `${data.openTime} - ${data.closeTime}` : '',
         ownerId: uid,
         isActive: true,
         role: 'restaurant',
@@ -422,7 +428,6 @@ function AddRestaurantModal({
                 { name: 'bankAccount',       label: 'Bank Account Number',    placeholder: 'Account Number',      type: 'text' },
                 { name: 'accountHolderName', label: 'Account Holder Name',     placeholder: 'As per bank records', type: 'text' },
                 { name: 'ifscCode',          label: 'IFSC Code',                placeholder: 'e.g. SBIN0001234',    type: 'text' },
-                { name: 'openingHours',      label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
               ].map(field => (
                 <div key={field.name}>
                   <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -441,6 +446,31 @@ function AddRestaurantModal({
                   )}
                 </div>
               ))}
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  Opening Hours (Optional)
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-gray-400 mb-1">Open</label>
+                    <input
+                      {...register('openTime')}
+                      type="time"
+                      className="input-field"
+                    />
+                  </div>
+                  <span className="text-gray-400 mt-4">→</span>
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-gray-400 mb-1">Close</label>
+                    <input
+                      {...register('closeTime')}
+                      type="time"
+                      className="input-field"
+                    />
+                  </div>
+                </div>
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -766,6 +796,11 @@ function EditRestaurantModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [locationCoords, setLocationCoords] = useState<{ lat: number; lng: number; placeId?: string; locationName?: string } | null>(null);
   const [payouts, setPayouts] = useState<any[]>([]);
+  const [showPassword, setShowPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [changingPass, setChangingPass] = useState(false);
+  const [changePassMode, setChangePassMode] = useState(false);
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<EditFormData>({
     resolver: zodResolver(editRestaurantSchema),
@@ -798,7 +833,9 @@ function EditRestaurantModal({
         bankAccount:        (restaurant as any).bankAccount        || '',
         accountHolderName:  (restaurant as any).accountHolderName  || '',
         ifscCode:           (restaurant as any).ifscCode           || '',
-        openingHours:       (restaurant as any).openingHours       || '',
+        openTime:  (restaurant as any).openTime  || '',
+        closeTime: (restaurant as any).closeTime || '',
+        loginId:   (restaurant as any).loginId  || '',
       });
       setLocationCoords(
         restaurant.lat && restaurant.lng
@@ -820,6 +857,7 @@ function EditRestaurantModal({
     setErrorMessage(null);
 
     try {
+      const phoneChanged = data.phone !== restaurant.phone;
       await updateDoc(doc(db, 'restaurants', restaurant.id), {
         name: data.name,
         phone: data.phone,
@@ -833,11 +871,24 @@ function EditRestaurantModal({
         bankAccount:        data.bankAccount        || '',
         accountHolderName:  data.accountHolderName  || '',
         ifscCode:           data.ifscCode           || '',
-        openingHours:       data.openingHours       || '',
+        openTime:           data.openTime           || '',
+        closeTime:          data.closeTime          || '',
+        openingHours: data.openTime && data.closeTime
+          ? `${data.openTime} - ${data.closeTime}` : '',
+        loginId:            data.loginId?.trim().toLowerCase() || '',
+        // Clear ownerId when phone changes so old Firebase Auth user loses access;
+        // new phone owner will claim it via phone-fallback on next login.
+        ...(phoneChanged && { ownerId: '' }),
         updatedAt: serverTimestamp(),
       });
 
-      if (data.email !== restaurant.email) {
+      if (phoneChanged) {
+        toast('⚠️ Phone changed — old owner login removed. New phone owner must log in to claim access.', {
+          icon: '📱',
+          duration: 6000,
+          style: { background: '#1d4ed8', color: 'white' }
+        });
+      } else if (data.email !== restaurant.email) {
         toast('⚠️ Email updated in database. Firebase Auth login email unchanged.', {
           icon: '⚠️',
           style: { background: '#f59e0b', color: 'white' }
@@ -886,6 +937,128 @@ function EditRestaurantModal({
                 </div>
               )}
 
+              {/* Login Credentials */}
+              <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
+                <p className="text-[10px] font-black text-gray-400 uppercase tracking-wider">Login Credentials</p>
+
+                {/* Restaurant ID */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[10px] text-gray-400 mb-0.5">Restaurant ID</p>
+                    <p className="text-xs font-mono text-gray-600 truncate">{restaurant?.id}</p>
+                  </div>
+                  <button type="button" onClick={() => { navigator.clipboard.writeText(restaurant?.id || ''); toast.success('ID copied'); }}
+                    className="p-2 rounded-xl bg-white border border-gray-200 text-gray-400 hover:text-gray-700 shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  </button>
+                </div>
+
+                {/* Password */}
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1">Password</p>
+                  {!changePassMode ? (
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-mono text-gray-700 flex-1">
+                        {(restaurant as any)?.loginPassword
+                          ? (showPassword ? (restaurant as any).loginPassword : '••••••••')
+                          : <span className="text-gray-400 text-xs">Not set</span>
+                        }
+                      </p>
+                      {(restaurant as any)?.loginPassword && (
+                        <>
+                          <button type="button" onClick={() => setShowPassword(p => !p)}
+                            className="p-2 rounded-xl bg-white border border-gray-200 text-gray-400 hover:text-gray-700">
+                            {showPassword
+                              ? <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                              : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            }
+                          </button>
+                          <button type="button" onClick={() => { navigator.clipboard.writeText((restaurant as any).loginPassword); toast.success('Password copied'); }}
+                            className="p-2 rounded-xl bg-white border border-gray-200 text-gray-400 hover:text-gray-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                          </button>
+                        </>
+                      )}
+                      <button type="button" onClick={() => { setChangePassMode(true); setNewPassword(''); }}
+                        className="px-3 py-1.5 rounded-xl bg-orange-50 border border-orange-200 text-orange-600 text-xs font-bold hover:bg-orange-100">
+                        Change
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <input
+                          type={showNewPass ? 'text' : 'password'}
+                          value={newPassword}
+                          onChange={e => setNewPassword(e.target.value)}
+                          placeholder="New password (min 6 chars)"
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2 pr-10 text-sm focus:outline-none focus:border-orange-400"
+                        />
+                        <button type="button" onClick={() => setShowNewPass(p => !p)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                          {showNewPass
+                            ? <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                            : <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                          }
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setChangePassMode(false)}
+                          className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-500 text-xs font-bold">
+                          Cancel
+                        </button>
+                        <button type="button" disabled={changingPass || newPassword.length < 6}
+                          onClick={async () => {
+                            if (!restaurant || newPassword.length < 6) return;
+                            setChangingPass(true);
+                            try {
+                              const { getFunctions, httpsCallable } = await import('firebase/functions');
+                              // Update via Firestore directly (admin has write access)
+                              const { doc: fsDoc, updateDoc: fsUpdate, getFirestore: fsGetFirestore } = await import('firebase/firestore');
+                              const { getAuth: fsGetAuth } = await import('firebase/auth');
+                              const idToken = await fsGetAuth().currentUser?.getIdToken();
+                              const res = await fetch('https://manabites.in/api/admin/create-restaurant-login', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+                                body: JSON.stringify({ restaurantId: restaurant.id, email: restaurant.email, password: newPassword }),
+                              });
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || 'Failed');
+                              toast.success('Password changed!');
+                              setChangePassMode(false);
+                              setNewPassword('');
+                            } catch (e: any) {
+                              toast.error(e.message || 'Failed to change password');
+                            } finally {
+                              setChangingPass(false);
+                            }
+                          }}
+                          className="flex-1 py-2 rounded-xl bg-orange-500 text-white text-xs font-bold disabled:opacity-50">
+                          {changingPass ? 'Saving…' : 'Save Password'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Login ID */}
+                <div>
+                  <p className="text-[10px] text-gray-400 mb-1">Login ID <span className="text-gray-300">(custom, for login)</span></p>
+                  <div className="flex gap-2 items-start">
+                    <div className="flex-1">
+                      <input
+                        {...register('loginId')}
+                        type="text"
+                        placeholder="e.g. pizza_palace or rest001"
+                        className={`w-full border rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:border-orange-400 ${errors.loginId ? 'border-red-400' : 'border-gray-200'}`}
+                      />
+                      {errors.loginId && <p className="text-red-500 text-xs mt-1">{errors.loginId.message}</p>}
+                      <p className="text-[10px] text-gray-400 mt-1">Lowercase, numbers, underscore only</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {[
                 { name: 'name', label: 'Restaurant Name *', placeholder: 'Paradise Biryani', type: 'text' },
                 { name: 'email', label: 'Owner Email *', placeholder: 'owner@restaurant.com', type: 'email' },
@@ -917,26 +1090,30 @@ function EditRestaurantModal({
                 errors={errors}
               />
 
-              {[
-                { name: 'openingHours', label: 'Opening Hours (Optional)', placeholder: '10:00 AM - 10:00 PM', type: 'text' },
-              ].map(field => (
-                <div key={field.name}>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
-                    {field.label}
-                  </label>
-                  <input
-                    {...register(field.name as keyof EditFormData)}
-                    type={field.type}
-                    placeholder={field.placeholder}
-                    className={`input-field ${errors[field.name as keyof EditFormData] ? 'border-red-400' : ''}`}
-                  />
-                  {errors[field.name as keyof EditFormData] && (
-                    <p className="text-red-500 text-xs mt-1">
-                      {errors[field.name as keyof EditFormData]?.message}
-                    </p>
-                  )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                  Opening Hours (Optional)
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-gray-400 mb-1">Open</label>
+                    <input
+                      {...register('openTime')}
+                      type="time"
+                      className="input-field"
+                    />
+                  </div>
+                  <span className="text-gray-400 mt-4">→</span>
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-gray-400 mb-1">Close</label>
+                    <input
+                      {...register('closeTime')}
+                      type="time"
+                      className="input-field"
+                    />
+                  </div>
                 </div>
-              ))}
+              </div>
 
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">

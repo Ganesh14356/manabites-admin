@@ -339,15 +339,11 @@ export default function VerticalsHub() {
     setFlags(prev => ({ ...prev, [key]: next }));
     setFlagsSaving(true);
     try {
-      const res = await fetch('/api/update-flags', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value: next }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
+      await setDoc(
+        doc(db, 'config', 'verticals'),
+        { [key]: next, updated_at: serverTimestamp() },
+        { merge: true },
+      );
       toast.success(`${FLAG_DEFS.find(f => f.key === key)?.label} ${next ? 'enabled' : 'disabled'}`);
     } catch (e: any) {
       setFlags(prev => ({ ...prev, [key]: !next }));

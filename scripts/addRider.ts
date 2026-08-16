@@ -4,16 +4,16 @@ import { getFirestore, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBGsRJLvGskQn6MYY1YnT_Z8rYIC0YCKhM',
-  authDomain: 'manabites-f3664.firebaseapp.com',
-  projectId: 'manabites-f3664',
-  storageBucket: 'manabites-f3664.firebasestorage.app',
+  authDomain: 'manabites2-6538e.firebaseapp.com',
+  projectId: 'manabites2-6538e',
+  storageBucket: 'manabites2-6538e.firebasestorage.app',
   messagingSenderId: '237962562883',
   appId: '1:237962562883:web:e99d1917b8ec559f90f3f6',
 };
 
 const app = initializeApp(firebaseConfig, 'seed');
 const auth = getAuth(app);
-const db = getFirestore(app, 'manabites');
+const db = getFirestore(app);
 
 const rider = {
   name: 'Charan Teja',

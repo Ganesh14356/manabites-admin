@@ -15,6 +15,7 @@ import Payouts from './pages/Admin/Payouts';
 import PromoCodes from './pages/Admin/PromoCodes';
 import Banners from './pages/Admin/Banners';
 import FoodCategories from './pages/Admin/FoodCategories';
+import LunchSpecials from './pages/Admin/LunchSpecials';
 import RestaurantApproval from './pages/Admin/RestaurantApproval';
 import RazorpayPayments from './pages/Admin/RazorpayPayments';
 import RiderManagement from './pages/Admin/RiderManagement';
@@ -55,11 +56,17 @@ import Expenses from './pages/Admin/Expenses';
 import PnLDashboard from './pages/Admin/PnLDashboard';
 import RapidoMonitor from './pages/Admin/RapidoMonitor';
 import CustomerWalletAdmin from './pages/Admin/CustomerWalletAdmin';
+import WalletAdmin from './pages/Admin/WalletAdmin';
+import RiderSubscriptionAdmin from './pages/Admin/RiderSubscriptionAdmin';
 import Fines from './pages/Admin/Fines';
 import ActivityLogs from './pages/Admin/ActivityLogs';
 import GroceryStores from './pages/Admin/GroceryStores';
 import GroceryProducts from './pages/Admin/GroceryProducts';
 import GroceryOrders from './pages/Admin/GroceryOrders';
+import QRManagement from './pages/Admin/QRManagement';
+import RidePricing from './pages/Admin/RidePricing';
+import RideManagement from './pages/Admin/RideManagement';
+import BeroozManagement from './pages/Admin/BeroozManagement';
 
 export default function App() {
   return (
@@ -96,6 +103,7 @@ export default function App() {
                 <Route path="promocodes" element={<PromoCodes />} />
                 <Route path="banners" element={<Banners />} />
                 <Route path="food-categories"  element={<FoodCategories />} />
+                <Route path="lunch-specials"   element={<LunchSpecials />} />
                 <Route path="restaurants-approval" element={<RestaurantApproval />} />
                 <Route path="razorpay" element={<RazorpayPayments />} />
                 <Route path="settings" element={<DeliveryFeeSettings />} />
@@ -138,10 +146,16 @@ export default function App() {
                 <Route path="pnl" element={<PnLDashboard />} />
                 <Route path="rapido-monitor" element={<RapidoMonitor />} />
                 <Route path="customer-wallet" element={<CustomerWalletAdmin />} />
+                <Route path="wallet-admin" element={<WalletAdmin />} />
+                <Route path="rider-subscriptions" element={<RiderSubscriptionAdmin />} />
                 <Route path="fines" element={<Fines />} />
                 <Route path="grocery-stores"   element={<GroceryStores />} />
                 <Route path="grocery-products" element={<GroceryProducts />} />
                 <Route path="grocery-orders"   element={<GroceryOrders />} />
+                <Route path="qr-management"    element={<QRManagement />} />
+                <Route path="ride-pricing"      element={<RidePricing />} />
+                <Route path="ride-management"  element={<RideManagement />} />
+                <Route path="berooz"           element={<BeroozManagement />} />
                 {/* Legacy alias */}
                 <Route path="delivery-settings" element={<Navigate to="/admin/settings" replace />} />
               </Route>

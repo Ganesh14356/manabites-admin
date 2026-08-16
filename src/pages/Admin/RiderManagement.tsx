@@ -584,7 +584,7 @@ export default function RiderManagement() {
 
     const unsubUsers = onSnapshot(
       query(collection(db, 'users'), where('role', '==', 'rider')),
-      snap => { usersData = snap.docs.map(d => ({ uid: d.id, ...d.data() } as RiderDoc)); merge(); },
+      snap => { usersData = snap.docs.map(d => ({ ...d.data(), uid: d.id } as RiderDoc)); merge(); },
       err => { toast.error('Failed to load riders: ' + err.message); setLoading(false); }
     );
 
@@ -751,7 +751,12 @@ export default function RiderManagement() {
         ? doc(db, 'riders', rider.uid)
         : doc(db, 'users', rider.uid);
       const activating = !rider.isActive;
-      await updateDoc(ref, { isActive: activating });
+      await updateDoc(ref, {
+        isActive: activating,
+        ...(activating
+          ? { approvalStatus: 'approved', approved: true }
+          : { approvalStatus: 'suspended', approved: false, isOnline: false }),
+      });
       await logAuditEvent({
         action: activating ? 'RIDER_ACTIVATED' : 'RIDER_SUSPENDED',
         entityType: 'rider', entityId: rider.uid, entityName: rider.name,
@@ -787,9 +792,9 @@ export default function RiderManagement() {
     setDeleting(true);
     try {
       if (deleteTarget._fromRidersCollection) {
-        const ph = String(deleteTarget.phone || deleteTarget.uid || '').replace(/^\+91/, '').trim();
-        if (ph) await deleteDoc(doc(db, 'riders', ph));
+        await deleteDoc(doc(db, 'riders', deleteTarget.uid));
       } else {
+        if (!deleteTarget.uid) throw new Error('Rider ID missing — cannot delete');
         await deleteDoc(doc(db, 'users', deleteTarget.uid));
         const ph = String(deleteTarget.phone || '').replace(/^\+91/, '').trim();
         if (ph) { try { await deleteDoc(doc(db, 'riders', ph)); } catch { /* ignore */ } }

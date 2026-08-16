@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, onSnapshot, query, orderBy,
-  addDoc, updateDoc, deleteDoc, doc, getDocs, setDoc, getDoc,
+  addDoc, updateDoc, deleteDoc, doc, getDocs, setDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Plus, Edit2, Trash2, X, Image } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Image, Camera, Link as LinkIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { uploadToImgBB } from '../../lib/imgbb';
 
 // ── Types ────────────────────────────────────────────────────────
 interface BaseItem {
@@ -89,6 +90,11 @@ export default function FoodCategories() {
   const [form, setForm]       = useState<any>(EMPTY_CAT);
   const [saving, setSaving]         = useState(false);
   const [timeFilter, setTimeFilter] = useState(true);
+  const [imgFile, setImgFile]         = useState<File | null>(null);
+  const [imgPreview, setImgPreview]   = useState<string | null>(null);
+  const [uploading, setUploading]     = useState(false);
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlInput, setUrlInput]       = useState('');
 
   // Load time-filter setting
   useEffect(() => {
@@ -153,24 +159,60 @@ export default function FoodCategories() {
     return { ...EMPTY_TREND, order: trend.length };
   };
 
-  const openAdd  = () => { setEditId(null); setForm(emptyForm()); setModal(true); };
+  const resetImgState = () => {
+    setImgFile(null); setImgPreview(null); setShowUrlInput(false); setUrlInput('');
+  };
+
+  const openAdd  = () => { setEditId(null); setForm(emptyForm()); resetImgState(); setModal(true); };
   const openEdit = (item: any) => {
     setEditId(item.id);
     const { id, ...rest } = item;
     setForm({ ...rest });
+    setImgFile(null);
+    setImgPreview(item.imageUrl || null);
+    setShowUrlInput(false);
+    setUrlInput('');
     setModal(true);
   };
-  const closeModal = () => { setModal(false); setEditId(null); };
+  const closeModal = () => { setModal(false); setEditId(null); resetImgState(); };
+
+  // Clipboard paste into image area when modal is open
+  useEffect(() => {
+    if (!modal) return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const imgItem = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith('image/'));
+      if (!imgItem) return;
+      const file = imgItem.getAsFile();
+      if (!file) return;
+      setImgFile(file);
+      setImgPreview(URL.createObjectURL(file));
+      setShowUrlInput(false);
+    };
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [modal]);
 
   const save = async () => {
     if (!form.name?.trim()) { toast.error('Name required'); return; }
     setSaving(true);
+    let imageUrl = form.imageUrl || '';
+    if (imgFile) {
+      setUploading(true);
+      try { imageUrl = await uploadToImgBB(imgFile); }
+      catch { toast.error('Image upload failed'); setSaving(false); setUploading(false); return; }
+      setUploading(false);
+    } else if (imgPreview && !imgFile) {
+      imageUrl = imgPreview;
+    } else if (!imgPreview) {
+      imageUrl = '';
+    }
     try {
+      const payload = { ...form, imageUrl };
       if (editId) {
-        await updateDoc(doc(db, tab, editId), { ...form });
+        await updateDoc(doc(db, tab, editId), payload);
         toast.success('Updated!');
       } else {
-        await addDoc(collection(db, tab), { ...form });
+        await addDoc(collection(db, tab), payload);
         toast.success('Added!');
       }
       closeModal();
@@ -427,12 +469,59 @@ export default function FoodCategories() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-500 block mb-1 flex items-center gap-1"><Image size={11} /> Image URL</label>
-                <input value={form.imageUrl} onChange={e => F('imageUrl', e.target.value)} placeholder="https://..."
-                  className="w-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl px-3 py-2.5 text-sm focus:border-brand outline-none text-gray-900 dark:text-white" />
-                {form.imageUrl && (
-                  <img src={form.imageUrl} alt="preview" className="mt-2 h-24 w-full object-cover rounded-xl"
-                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                <label className="text-xs font-bold text-gray-500 block mb-1.5 flex items-center gap-1"><Image size={11} /> Photo</label>
+                <label className="cursor-pointer block">
+                  <div className={`w-full h-28 border-2 border-dashed rounded-2xl flex items-center justify-center overflow-hidden transition-colors ${imgPreview ? 'border-transparent' : 'border-gray-200 dark:border-gray-700 hover:border-brand'}`}>
+                    {imgPreview
+                      ? <img src={imgPreview} className="w-full h-full object-cover rounded-2xl" alt="preview"
+                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+                      : <div className="text-center">
+                          <Camera className="w-7 h-7 text-gray-300 mx-auto mb-1" />
+                          <p className="text-xs font-semibold text-gray-400">Click to upload</p>
+                          <p className="text-[10px] text-gray-300 mt-0.5">or Ctrl+V to paste</p>
+                        </div>
+                    }
+                  </div>
+                  <input type="file" accept="image/*" className="hidden" onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setImgFile(file);
+                    setImgPreview(URL.createObjectURL(file));
+                    setShowUrlInput(false);
+                  }} />
+                </label>
+                <AnimatePresence>
+                  {!showUrlInput ? (
+                    <motion.button type="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      onClick={() => setShowUrlInput(true)}
+                      className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-brand bg-gray-50 dark:bg-gray-800 hover:bg-brand/5 border border-gray-200 dark:border-gray-700 hover:border-brand/30 px-3 py-1.5 rounded-lg transition-all">
+                      <LinkIcon className="w-3 h-3" /> Paste image link
+                    </motion.button>
+                  ) : (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                      className="mt-2 flex gap-2 overflow-hidden">
+                      <input type="url" value={urlInput} onChange={e => setUrlInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (urlInput.trim()) { setImgPreview(urlInput.trim()); setImgFile(null); setShowUrlInput(false); setUrlInput(''); }}}}
+                        placeholder="https://example.com/image.jpg"
+                        className="flex-1 px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-xs outline-none focus:border-brand text-gray-900 dark:text-white" autoFocus />
+                      <button type="button" disabled={!urlInput.trim()}
+                        onClick={() => { const url = urlInput.trim(); if (url) { setImgPreview(url); setImgFile(null); setShowUrlInput(false); setUrlInput(''); }}}
+                        className="px-3 py-2 bg-brand text-white text-xs font-bold rounded-lg disabled:opacity-40">Use</button>
+                      <button type="button" onClick={() => { setShowUrlInput(false); setUrlInput(''); }}
+                        className="px-2 py-2 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded-lg"><X className="w-3.5 h-3.5" /></button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {imgPreview && (
+                  <button type="button" onClick={() => { setImgFile(null); setImgPreview(null); F('imageUrl', ''); }}
+                    className="mt-1.5 text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                    <X className="w-3 h-3" /> Remove photo
+                  </button>
+                )}
+                {uploading && (
+                  <p className="text-xs text-brand mt-1 flex items-center gap-1.5">
+                    <span className="w-3 h-3 border-2 border-brand border-t-transparent rounded-full animate-spin inline-block" /> Uploading...
+                  </p>
                 )}
               </div>
 
@@ -507,9 +596,9 @@ export default function FoodCategories() {
 
               <div className="flex gap-3 pt-1">
                 <button onClick={closeModal} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-bold text-gray-600">Cancel</button>
-                <button onClick={save} disabled={saving || !form.name?.trim()}
+                <button onClick={save} disabled={saving || uploading || !form.name?.trim()}
                   className="flex-1 py-3 bg-brand text-white rounded-2xl font-black text-sm disabled:opacity-50 shadow">
-                  {saving ? 'Saving…' : editId ? 'Update' : 'Add'}
+                  {uploading ? 'Uploading…' : saving ? 'Saving…' : editId ? 'Update' : 'Add'}
                 </button>
               </div>
             </motion.div>

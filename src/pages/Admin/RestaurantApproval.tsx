@@ -989,13 +989,51 @@ export default function RestaurantApproval() {
                   </div>
                 </section>
 
+                {/* Images */}
+                {((detailTarget as any).logoUrl || (detailTarget as any).logo || (detailTarget as any).bannerUrl || (detailTarget as any).banner) && (
+                  <section>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Photos</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {((detailTarget as any).logoUrl || (detailTarget as any).logo) && (
+                        <div>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Logo</p>
+                          <a href={(detailTarget as any).logoUrl || (detailTarget as any).logo} target="_blank" rel="noopener noreferrer">
+                            <img src={(detailTarget as any).logoUrl || (detailTarget as any).logo} alt="logo"
+                              className="w-full h-24 object-cover rounded-xl border border-gray-200 hover:opacity-80 transition-opacity" />
+                          </a>
+                        </div>
+                      )}
+                      {((detailTarget as any).bannerUrl || (detailTarget as any).banner) && (
+                        <div>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Banner</p>
+                          <a href={(detailTarget as any).bannerUrl || (detailTarget as any).banner} target="_blank" rel="noopener noreferrer">
+                            <img src={(detailTarget as any).bannerUrl || (detailTarget as any).banner} alt="banner"
+                              className="w-full h-24 object-cover rounded-xl border border-gray-200 hover:opacity-80 transition-opacity" />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
                 {/* Documents */}
                 <section>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Documents & Compliance</p>
                   <div className="space-y-2">
-                    <DocLink label="FSSAI License" url={detailTarget.fssaiDocUrl} number={detailTarget.fssaiNumber} />
-                    <DocLink label="PAN Card"      url={detailTarget.panDocUrl}   number={detailTarget.panNumber} />
-                    <DocLink label="Bank Account"  number={detailTarget.bankAccountNumber ? `${detailTarget.bankAccountNumber} · ${detailTarget.bankIFSC}` : undefined} />
+                    <DocLink label="FSSAI License" url={detailTarget.fssaiDocUrl}
+                      number={(detailTarget as any).fssai || detailTarget.fssaiNumber} />
+                    <DocLink label="GST Number"
+                      number={(detailTarget as any).gst} />
+                    <DocLink label="PAN Card" url={detailTarget.panDocUrl}
+                      number={(detailTarget as any).pan || detailTarget.panNumber} />
+                    <DocLink label="UPI ID"
+                      number={(detailTarget as any).upiId} />
+                    <DocLink label="Bank Account"
+                      number={
+                        (detailTarget.bankAccountNumber || (detailTarget as any).bankDetails?.accountNumber)
+                          ? `${detailTarget.bankAccountNumber || (detailTarget as any).bankDetails?.accountNumber} · ${detailTarget.bankIFSC || (detailTarget as any).bankDetails?.ifsc || '—'} · ${(detailTarget as any).bankDetails?.bankName || ''}`
+                          : undefined
+                      } />
                   </div>
                 </section>
 

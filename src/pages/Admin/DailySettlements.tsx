@@ -66,6 +66,7 @@ function todayISO() {
 // ── Component ─────────────────────────────────────────────────────
 export default function DailySettlements() {
   const [date, setDate] = useState(todayISO());
+  const [manualCommissionRate, setManualCommissionRate] = useState<string>('');
   const [calculating, setCalculating] = useState(false);
   const [generating, setGenerating] = useState<'manual' | 'online' | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -77,9 +78,14 @@ export default function DailySettlements() {
     setPreview(null);
     try {
       // Load settings
-      const settingsSnap = await getDoc(doc(db, 'settings', 'deliveryFees'));
+      const [settingsSnap, commSnap] = await Promise.all([
+        getDoc(doc(db, 'settings', 'deliveryFees')),
+        getDoc(doc(db, 'settings', 'commissionConfig')),
+      ]);
       const s = settingsSnap.data() ?? {};
-      const commissionRate: number = s.commissionRate ?? 20;
+      const c = commSnap.data() ?? {};
+      const manualRate = parseFloat(manualCommissionRate);
+      const commissionRate: number = (!isNaN(manualRate) && manualRate > 0) ? manualRate : (c.defaultRate ?? s.commissionRate ?? 10);
       const riderPayPerDelivery: number = s.riderPayPerDelivery ?? 35;
 
       // Date range for the selected day
@@ -115,7 +121,7 @@ export default function DailySettlements() {
           });
         }
         const r = restMap.get(rid)!;
-        const gross = order.total ?? order.totalAmount ?? 0;
+        const gross = order.subtotal ?? order.total ?? order.totalAmount ?? 0;
         r.ordersCount++;
         r.orderIds.push(order.id);
         r.grossAmount += gross;
@@ -360,6 +366,20 @@ export default function DailySettlements() {
             max={todayISO()}
             onChange={e => { setDate(e.target.value); setPreview(null); }}
             className="border-2 border-gray-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand transition-colors"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+            Commission Rate (%)
+          </label>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={manualCommissionRate}
+            onChange={e => { setManualCommissionRate(e.target.value); setPreview(null); }}
+            placeholder="Auto"
+            className="w-28 border-2 border-gray-100 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:border-brand transition-colors"
           />
         </div>
         <button

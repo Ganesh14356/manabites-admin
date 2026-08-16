@@ -10,6 +10,7 @@ export interface DeliveryFeeSettings {
   taxPercent: number;
   referralBonus: number;
   referralMilestoneBonus: number;
+  rapidoSurcharge: number;
   updatedAt: any;
   updatedBy: string;
 }
@@ -26,6 +27,7 @@ export const DEFAULT_DELIVERY_SETTINGS: Omit<DeliveryFeeSettings, 'updatedAt' | 
   taxPercent: 5,
   referralBonus: 10,
   referralMilestoneBonus: 50,
+  rapidoSurcharge: 20,
 };
 
 export interface DeliveryFeeFormData {
@@ -40,4 +42,5 @@ export interface DeliveryFeeFormData {
   taxPercent: string;
   referralBonus: string;
   referralMilestoneBonus: string;
+  rapidoSurcharge: string;
 }

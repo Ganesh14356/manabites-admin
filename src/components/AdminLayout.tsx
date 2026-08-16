@@ -6,9 +6,9 @@ import {
   Calculator, Percent, Sun, Moon, MessageCircle, Zap, Wallet, Crown, Shield, Crosshair,
   ShieldAlert, Ban, Rocket, Building2, Gift, Megaphone, UserCheck, Brain, Globe,
   Headphones, Receipt, Gavel, ClipboardList, Radar, Banknote, Activity,
-  ShoppingCart, Package, Warehouse, UtensilsCrossed,
+  ShoppingCart, Package, Warehouse, UtensilsCrossed, QrCode, Car,
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,9 +45,13 @@ const BASE_NAV = [
   { name: 'P&L Dashboard',      path: '/admin/pnl',                  icon: TrendingUp  },
   { name: 'Rapido Monitor',     path: '/admin/rapido-monitor',       icon: Zap         },
   { name: 'Customer Wallet',    path: '/admin/customer-wallet',      icon: Wallet      },
+  { name: 'Wallet Admin',       path: '/admin/wallet-admin',          icon: Wallet      },
+  { name: 'Rider Subscriptions', path: '/admin/rider-subscriptions',  icon: Crown       },
   { name: 'Fines',               path: '/admin/fines',                icon: Gavel       },
   { name: 'Commission',          path: '/admin/commission',           icon: Percent     },
   { name: 'Surge Pricing',      path: '/admin/surge-pricing',        icon: Zap         },
+  { name: 'Ride Pricing',       path: '/admin/ride-pricing',         icon: Bike        },
+  { name: 'Ride Management',   path: '/admin/ride-management',      icon: Car         },
   { name: 'Wallet & Gold',      path: '/admin/wallet',               icon: Wallet      },
   { name: 'Sub-Admins',         path: '/admin/sub-admins',           icon: Shield      },
   { name: 'Activity Logs',      path: '/admin/activity-logs',        icon: Activity    },
@@ -57,6 +61,7 @@ const BASE_NAV = [
   { name: 'Promo Codes',          path: '/admin/promocodes',           icon: Tag        },
   { name: 'Offer Banners',        path: '/admin/banners',              icon: Image      },
   { name: 'Home Screen Sections', path: '/admin/food-categories',      icon: UtensilsCrossed },
+  { name: 'Time-Based Specials', path: '/admin/lunch-specials',        icon: UtensilsCrossed },
   { name: 'Fraud Detection',     path: '/admin/fraud',                icon: ShieldAlert },
   { name: 'Blacklist',           path: '/admin/blacklist',            icon: Ban        },
   { name: 'Rider Incentives',      path: '/admin/rider-incentives',     icon: Gift       },
@@ -65,11 +70,15 @@ const BASE_NAV = [
   { name: 'City Manager',         path: '/admin/cities',               icon: Globe      },
   { name: 'Franchises',           path: '/admin/franchises',           icon: Building2  },
   { name: 'AI Insights',          path: '/admin/ai-insights',          icon: Brain      },
+  { name: '── Dine-In QR ──',       path: '',                            icon: QrCode, divider: true },
+  { name: 'QR Management',        path: '/admin/qr-management',        icon: QrCode     },
   { name: '── Grocery ──',         path: '',                            icon: ShoppingCart, divider: true },
   { name: 'Grocery Stores',       path: '/admin/grocery-stores',       icon: Warehouse  },
   { name: 'Grocery Products',     path: '/admin/grocery-products',     icon: Package    },
   { name: 'Grocery Orders',       path: '/admin/grocery-orders',       icon: ShoppingCart },
   { name: 'Verticals Hub',        path: '/admin/verticals',            icon: Rocket     },
+  { name: '── Berooz ──',         path: '',                            icon: Car, divider: true },
+  { name: '🛺 Berooz Management', path: '/admin/berooz',              icon: Car        },
   { name: 'Settings',             path: '/admin/settings',             icon: Settings   },
 ];
 
@@ -79,6 +88,33 @@ const FRANCHISE_NAV_KEYS = [
   '/admin/riders', '/admin/rider-performance', '/admin/settlements',
   '/admin/commission', '/admin/refunds', '/admin/franchises',
 ];
+
+// ── Admin order alert sound (Web Audio API — no file needed) ──────────────────
+function playNewOrderSound() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const play = (freq: number, start: number, duration: number, vol = 0.4) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+      gain.gain.setValueAtTime(0, ctx.currentTime + start);
+      gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + start + 0.02);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + start + duration);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + duration + 0.05);
+    };
+    // Cheerful ding-ding-ding pattern
+    play(880, 0,    0.12);
+    play(1100, 0.14, 0.12);
+    play(1320, 0.28, 0.18);
+    play(1100, 0.48, 0.10);
+    play(1320, 0.60, 0.22);
+    setTimeout(() => ctx.close(), 1200);
+  } catch { /* AudioContext blocked — silently skip */ }
+}
 
 export default function AdminLayout() {
   const location = useLocation();
@@ -171,11 +207,32 @@ export default function AdminLayout() {
     return () => unsub();
   }, [user]);
 
-  // Live pending orders badge
+  // Live pending orders badge + sound alert on new order
+  const prevOrderIdsRef = useRef<Set<string> | null>(null);
+  const soundEnabledRef = useRef(true);
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'orders'), where('status', 'in', ['pending', 'placed']));
-    const unsub = onSnapshot(q, snap => setPendingOrders(snap.size), () => {});
+    const unsub = onSnapshot(q, snap => {
+      const currentIds = new Set(snap.docs.map(d => d.id));
+      setPendingOrders(currentIds.size);
+
+      if (prevOrderIdsRef.current !== null && soundEnabledRef.current) {
+        const newOrders = snap.docs.filter(d => !prevOrderIdsRef.current!.has(d.id));
+        if (newOrders.length > 0) {
+          playNewOrderSound();
+          // Browser notification (if permission granted)
+          if (Notification.permission === 'granted') {
+            new Notification(`🍽️ ${newOrders.length} New Order${newOrders.length > 1 ? 's' : ''}!`, {
+              body: `${newOrders.length} new order${newOrders.length > 1 ? 's' : ''} waiting for action`,
+              icon: '/icons/icon-192.png',
+              tag: 'admin-new-order',
+            });
+          }
+        }
+      }
+      prevOrderIdsRef.current = currentIds;
+    }, () => {});
     return () => unsub();
   }, [user]);
 
@@ -202,6 +259,16 @@ export default function AdminLayout() {
     const unsub = onSnapshot(q, snap => setPendingPayouts(snap.size), () => {});
     return () => unsub();
   }, [user]);
+
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Scroll content to top whenever route changes
+  useEffect(() => {
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -418,7 +485,7 @@ export default function AdminLayout() {
       </div>
 
       {/* ── Main Content ──────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto dark:bg-gray-950 w-full min-h-screen">
+      <div ref={contentRef} className="flex-1 overflow-y-auto dark:bg-gray-950 w-full min-h-screen">
         {/* Desktop top bar */}
         <div className="hidden md:flex items-center justify-between px-6 py-3.5 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 sticky top-0 z-10">
           <div>

@@ -5,6 +5,7 @@
   "framework": "vite",
   "alias": ["admin.manabites.in"],
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://manabites.in/api/:path*" },
     { "source": "/((?!assets).*)", "destination": "/index.html" }
   ],
   "headers": [

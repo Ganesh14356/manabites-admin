@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, addDoc, serverTimestamp, onSnapshot,
-  query, orderBy, getDocs, limit,
+  query, orderBy, getDocs, limit, deleteDoc, doc,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { Bell, Send, Users, Bike, Store, CheckCircle, X } from 'lucide-react';
+import { Bell, Send, Users, Bike, Store, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 type Audience = 'all_customers' | 'all_riders' | 'all_restaurants' | 'all';
@@ -42,6 +42,7 @@ export default function NotificationsBroadcast() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [history, setHistory]       = useState<SentNotification[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -129,23 +130,31 @@ export default function NotificationsBroadcast() {
       });
 
       // 3. Send real FCM push notifications to mobile devices
-      let pushResult = { success: 0, failed: 0, total: 0 };
+      let pushResult: { success: number; failed: number; total: number; skipped?: string; error?: string } =
+        { success: 0, failed: 0, total: 0 };
       try {
         const resp = await fetch('/api/send-fcm', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ title: title.trim(), message: message.trim(), audience }),
         });
+        const json = await resp.json();
         if (resp.ok) {
-          pushResult = await resp.json();
+          pushResult = json;
+        } else {
+          console.error('FCM API error:', json.error);
+          toast.error(`Push failed: ${json.error}`);
         }
-      } catch {
-        // Push failure is non-critical — in-app notifications already sent
+      } catch (pushErr: any) {
+        console.error('FCM fetch error:', pushErr);
       }
 
-      const pushInfo = pushResult.total > 0
-        ? ` · 📱 Push sent to ${pushResult.success}/${pushResult.total} devices`
-        : '';
+      let pushInfo = '';
+      if (pushResult.total > 0) {
+        pushInfo = ` · 📱 ${pushResult.success}/${pushResult.total} devices`;
+      } else if (pushResult.skipped) {
+        pushInfo = ` · ⚠️ No device tokens found`;
+      }
       toast.success(`Sent to ${recipients.length} recipients!${pushInfo}`);
       setTitle('');
       setMessage('');
@@ -153,6 +162,19 @@ export default function NotificationsBroadcast() {
       toast.error(err?.message || 'Failed to send');
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleDeleteHistory = async (id: string) => {
+    if (!window.confirm('Delete this notification from history?')) return;
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, 'broadcastNotifications', id));
+      toast.success('Deleted from history');
+    } catch (err: any) {
+      toast.error('Delete failed: ' + err.message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -280,10 +302,23 @@ export default function NotificationsBroadcast() {
               {history.map(n => (
                 <div key={n.id} className="p-3 rounded-xl bg-gray-50 border border-gray-100">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-black text-gray-900 text-sm leading-tight">{n.title}</p>
-                    <span className="text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-full flex-shrink-0">
-                      {n.sentCount} sent
-                    </span>
+                    <p className="font-black text-gray-900 text-sm leading-tight flex-1 min-w-0">{n.title}</p>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span className="text-[10px] font-black text-brand bg-brand/10 px-2 py-0.5 rounded-full">
+                        {n.sentCount} sent
+                      </span>
+                      <button
+                        onClick={() => handleDeleteHistory(n.id)}
+                        disabled={deletingId === n.id}
+                        className="p-1 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                        title="Delete from history"
+                      >
+                        {deletingId === n.id
+                          ? <span className="w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin inline-block" />
+                          : <Trash2 size={12} />
+                        }
+                      </button>
+                    </div>
                   </div>
                   <p className="text-xs text-gray-500 mt-1 line-clamp-2">{n.message}</p>
                   <div className="flex items-center justify-between mt-2">

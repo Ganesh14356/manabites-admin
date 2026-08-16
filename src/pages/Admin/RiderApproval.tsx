@@ -1549,8 +1549,8 @@ export default function RiderApproval() {
 
               {/* Header */}
               <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-white flex items-center gap-4 flex-shrink-0">
-                {detailTarget.profileImage ? (
-                  <img src={detailTarget.profileImage} alt={detailTarget.name}
+                {(detailTarget.profileImage || (detailTarget as any).profilePhotoUrl || (detailTarget as any).documents?.profilePhoto?.downloadUrl) ? (
+                  <img src={detailTarget.profileImage || (detailTarget as any).profilePhotoUrl || (detailTarget as any).documents?.profilePhoto?.downloadUrl} alt={detailTarget.name}
                     className="w-14 h-14 rounded-2xl object-cover border-2 border-white shadow-md flex-shrink-0" />
                 ) : (
                   <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-black text-xl flex-shrink-0 shadow-md">
@@ -1659,19 +1659,29 @@ export default function RiderApproval() {
                   <div className="space-y-2">
                     <DocVerifyRow
                       label="Driving License" number={detailTarget.licenseNumber}
-                      url={detailTarget.licenseDocUrl} verified={detailTarget.licenseVerified}
+                      url={detailTarget.licenseDocUrl || (detailTarget as any).documents?.drivingLicense?.downloadUrl}
+                      verified={detailTarget.licenseVerified}
                       onVerify={() => handleDocVerify(detailTarget, 'licenseVerified', true)}
                       onFlag={() => handleDocVerify(detailTarget, 'licenseVerified', false)}
                     />
                     <DocVerifyRow
-                      label="Aadhaar Card" number={detailTarget.aadharNumber}
-                      url={detailTarget.aadharDocUrl} verified={detailTarget.aadharVerified}
+                      label="Vehicle RC"
+                      url={(detailTarget as any).documents?.vehicleRc?.downloadUrl}
+                      verified={(detailTarget as any).rcVerified}
+                      onVerify={() => handleDocVerify(detailTarget, 'rcVerified', true)}
+                      onFlag={() => handleDocVerify(detailTarget, 'rcVerified', false)}
+                    />
+                    <DocVerifyRow
+                      label="Aadhaar Card" number={detailTarget.aadharNumber || (detailTarget as any).aadhaar}
+                      url={detailTarget.aadharDocUrl || (detailTarget as any).documents?.aadhaarCard?.downloadUrl}
+                      verified={detailTarget.aadharVerified}
                       onVerify={() => handleDocVerify(detailTarget, 'aadharVerified', true)}
                       onFlag={() => handleDocVerify(detailTarget, 'aadharVerified', false)}
                     />
                     <DocVerifyRow
                       label="PAN Card" number={detailTarget.panNumber}
-                      url={detailTarget.panDocUrl} verified={detailTarget.panVerified}
+                      url={detailTarget.panDocUrl}
+                      verified={detailTarget.panVerified}
                       onVerify={() => handleDocVerify(detailTarget, 'panVerified', true)}
                       onFlag={() => handleDocVerify(detailTarget, 'panVerified', false)}
                     />
@@ -1685,7 +1695,8 @@ export default function RiderApproval() {
                       onFlag={() => handleDocVerify(detailTarget, 'bankVerified', false)}
                     />
                     <DocVerifyRow
-                      label="Profile Photo" url={detailTarget.profileImage}
+                      label="Profile Photo"
+                      url={detailTarget.profileImage || (detailTarget as any).profilePhotoUrl || (detailTarget as any).documents?.profilePhoto?.downloadUrl}
                       verified={detailTarget.profileVerified}
                       onVerify={() => handleDocVerify(detailTarget, 'profileVerified', true)}
                       onFlag={() => handleDocVerify(detailTarget, 'profileVerified', false)}

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { MapContainer, TileLayer, Marker, Circle, Popup, Polygon, useMapEvents, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import toast from 'react-hot-toast';
 import { Save, MapPin, ShieldCheck, Hexagon, X, RotateCcw, Search, Loader2 } from 'lucide-react';
@@ -369,11 +368,11 @@ export default function Geofencing() {
             </>
           )}
 
-          <div className="flex-1 rounded-2xl overflow-hidden shadow-sm border border-gray-200 min-h-[500px]">
+          <div className="rounded-2xl overflow-hidden shadow-sm border border-gray-200" style={{ height: '520px' }}>
             <MapContainer
               center={[17.4483, 78.3915]}
               zoom={12}
-              className="h-full w-full"
+              style={{ height: '100%', width: '100%' }}
               scrollWheelZoom
             >
               <TileLayer

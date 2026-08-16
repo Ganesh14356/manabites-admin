@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
   collection, getDocs, query, where, limit,
-  doc, getDoc, updateDoc, addDoc, serverTimestamp, increment,
+  doc, getDoc,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Wallet, Plus, Minus, CheckCircle, AlertCircle, User } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -29,21 +29,135 @@ export default function CustomerWalletAdmin() {
   const [reason, setReason]         = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  const handleSearchByUid = async (uid: string) => {
+    if (!uid.trim()) return;
+    setSearching(true);
+    setSelected(null);
+    setCustomers([]);
+    try {
+      const { getDoc, doc } = await import('firebase/firestore');
+      const userSnap = await getDoc(doc(db, 'users', uid.trim()));
+      const walletSnap = await getDoc(doc(db, 'wallets', uid.trim()));
+      const balance = walletSnap.exists() ? (walletSnap.data()?.balance ?? 0) : 0;
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        setSelected({ id: uid.trim(), ...data, walletBalance: balance } as Customer);
+        setSearch(data.name || data.email || uid.trim());
+      } else {
+        setSelected({ id: uid.trim(), name: 'Unknown User', walletBalance: balance });
+        setSearch(uid.trim());
+        toast('User doc not found — proceeding with UID only', { icon: 'ℹ️' });
+      }
+    } catch (e: any) {
+      toast.error('UID lookup failed: ' + e.message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   const handleSearch = async () => {
     const q = search.trim();
     if (!q) return;
+    // If it looks like a Firebase UID (28 chars, alphanumeric), search by UID directly
+    if (/^[A-Za-z0-9]{20,}$/.test(q)) { handleSearchByUid(q); return; }
     setSearching(true);
     setSelected(null);
+    setCustomers([]);
     try {
-      const snap = await getDocs(collection(db, 'users'));
-      const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
+      const results: Customer[] = [];
+      const seen = new Set<string>();
       const lower = q.toLowerCase();
-      const results = all.filter(u =>
-        u.name?.toLowerCase().includes(lower) ||
-        u.email?.toLowerCase().includes(lower) ||
-        u.phone?.includes(q)
-      ).slice(0, 8);
-      setCustomers(results);
+      const digits = q.replace(/\D/g, '');
+
+      // 1. Indexed Firestore queries — fast & exact
+      const indexedQueries: Promise<any>[] = [
+        getDocs(query(collection(db, 'users'), where('email', '==', q))),
+        getDocs(query(collection(db, 'users'), where('email', '==', q.toLowerCase()))),
+      ];
+      if (digits.length >= 10) {
+        const last10 = digits.slice(-10);
+        indexedQueries.push(
+          getDocs(query(collection(db, 'users'), where('phone', '==', last10))),
+          getDocs(query(collection(db, 'users'), where('phone', '==', `+91${last10}`))),
+          getDocs(query(collection(db, 'users'), where('phone', '==', `91${last10}`))),
+          getDocs(query(collection(db, 'users'), where('phoneNumber', '==', `+91${last10}`))),
+          getDocs(query(collection(db, 'users'), where('phoneNumber', '==', last10))),
+          getDocs(query(collection(db, 'users'), where('mobile', '==', last10))),
+          getDocs(query(collection(db, 'users'), where('mobile', '==', `+91${last10}`))),
+        );
+      }
+
+      const snaps = await Promise.allSettled(indexedQueries);
+      for (const s of snaps) {
+        if (s.status === 'fulfilled') {
+          for (const d of s.value.docs) {
+            if (!seen.has(d.id)) { seen.add(d.id); results.push({ id: d.id, ...d.data() } as Customer); }
+          }
+        }
+      }
+
+      // 2. Full scan of users collection
+      try {
+        const allSnap = await getDocs(query(collection(db, 'users'), limit(500)));
+        for (const d of allSnap.docs) {
+          if (seen.has(d.id)) continue;
+          const data = d.data();
+          // Skip restaurant/rider accounts — they're not customers
+          if (data.role === 'restaurant' || data.isRestaurant || data.restaurantId) continue;
+          // ownerPhone excluded — restaurant owners share admin phone but aren't customers
+          const phoneFields = [
+            data.phone, data.phoneNumber, data.mobile, data.contact,
+            data.displayPhone,
+          ].map(v => String(v || '').replace(/\D/g, ''));
+          const matchPhone = digits.length >= 6 && phoneFields.some(p => p.length >= 6 && (p.includes(digits) || digits.includes(p.slice(-10))));
+          const matchText  = lower.length >= 2 && (
+            data.name?.toLowerCase().includes(lower) ||
+            data.displayName?.toLowerCase().includes(lower) ||
+            data.email?.toLowerCase().includes(lower)
+          );
+          if (matchPhone || matchText) {
+            seen.add(d.id);
+            results.push({ id: d.id, ...data } as Customer);
+          }
+        }
+      } catch { /* security rules may block full scan */ }
+
+      // 3. Fallback — search orders collection by phone to get customerId
+      if (results.length === 0 && digits.length >= 10) {
+        const last10 = digits.slice(-10);
+        const orderVariants = [last10, `+91${last10}`, `91${last10}`];
+        const orderQueries = orderVariants.flatMap(v => [
+          getDocs(query(collection(db, 'orders'), where('phone', '==', v), limit(3))),
+          getDocs(query(collection(db, 'orders'), where('customerPhone', '==', v), limit(3))),
+          getDocs(query(collection(db, 'orders'), where('deliveryPhone', '==', v), limit(3))),
+        ]);
+        const orderSnaps = await Promise.allSettled(orderQueries);
+        for (const s of orderSnaps) {
+          if (s.status !== 'fulfilled') continue;
+          for (const d of s.value.docs) {
+            const data = d.data();
+            const uid = data.customerId || data.userId;
+            if (uid && !seen.has(uid)) {
+              seen.add(uid);
+              // Fetch user doc and wallet balance
+              try {
+                const [uSnap, wSnap] = await Promise.all([
+                  getDoc(doc(db, 'users', uid)),
+                  getDoc(doc(db, 'wallets', uid)),
+                ]);
+                const balance = wSnap.exists() ? (wSnap.data()?.balance ?? 0) : 0;
+                const uData = uSnap.exists() ? uSnap.data() : {};
+                results.push({ id: uid, name: data.customerName || (uData as any).name, phone: last10, walletBalance: balance, ...uData } as Customer);
+              } catch {
+                results.push({ id: uid, name: data.customerName, phone: last10 } as Customer);
+              }
+            }
+          }
+        }
+      }
+
+      setCustomers(results.slice(0, 8));
+      if (results.length === 0) toast.error('Customer not found');
     } finally {
       setSearching(false);
     }
@@ -68,32 +182,34 @@ export default function CustomerWalletAdmin() {
     setSubmitting(true);
     try {
       const change = mode === 'credit' ? amt : -amt;
-      // Write transaction log first — if wallet update fails, log exists as evidence but balance is unchanged
-      await addDoc(collection(db, 'walletTransactions'), {
-        userId:    selected.id,
-        amount:    change,
-        type:      mode === 'credit' ? 'credit' : 'debit',
-        reason:    reason.trim(),
-        addedBy:   'admin',
-        createdAt: Date.now(),
+
+      // Use server endpoint (Admin SDK) to bypass Firestore rules
+      const token = await auth.currentUser?.getIdToken(/* forceRefresh */ true);
+      if (!token) throw new Error('Not authenticated — please sign out and sign in again');
+
+      // Use relative URL so Vercel proxy forwards the request (avoids CORS issues)
+      const res = await fetch('/api/admin-wallet-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          customerId: selected.id,
+          amount: amt,
+          mode,
+          reason: reason.trim(),
+        }),
       });
-      // Update wallet (increment is atomic server-side)
-      await updateDoc(doc(db, 'wallets', selected.id), { balance: increment(change), updatedAt: Date.now() });
-      // Admin audit log
-      await addDoc(collection(db, 'adminWalletActions'), {
-        customerId:   selected.id,
-        customerName: selected.name || selected.email,
-        action:       mode,
-        amount:       amt,
-        reason:       reason.trim(),
-        createdAt:    serverTimestamp(),
-      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`[${res.status}] ${err.error || 'Wallet update failed'}`);
+      }
+
       toast.success(`${fmt(amt)} ${mode === 'credit' ? 'credited to' : 'debited from'} ${selected.name || 'customer'}`);
       setSelected(prev => prev ? { ...prev, walletBalance: (prev.walletBalance ?? 0) + change } : null);
       setAmount('');
       setReason('');
     } catch (e: any) {
-      toast.error(e.message);
+      toast.error(e.message || 'Wallet update failed');
     } finally {
       setSubmitting(false);
     }
@@ -116,8 +232,9 @@ export default function CustomerWalletAdmin() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
+              autoComplete="off"
               value={search}
-              onChange={e => { setSearch(e.target.value); setSelected(null); }}
+              onChange={e => { setSearch(e.target.value); setSelected(null); setCustomers([]); }}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
               placeholder="Name, email, or phone…"
               className="w-full pl-9 pr-4 py-3 border-2 border-gray-100 rounded-xl text-sm font-bold outline-none focus:border-brand transition-colors"

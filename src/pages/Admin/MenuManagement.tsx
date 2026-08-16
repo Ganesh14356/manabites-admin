@@ -7,11 +7,11 @@ import { z } from 'zod';
 import toast from 'react-hot-toast';
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, where, serverTimestamp, getDoc
+  onSnapshot, query, where, serverTimestamp, getDoc
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, storage } from '../../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuth } from '../../contexts/AuthContext';
-import { uploadToImgBB } from '../../lib/imgbb';
 import {
   Plus, Edit2, Trash2, ToggleLeft, ToggleRight,
   ArrowLeft, X, Search, Image as ImageIcon, Camera, Link as LinkIcon
@@ -63,23 +63,30 @@ export default function MenuManagement() {
       if (snap.exists()) setRestaurantName(snap.data().name);
     });
 
-    // Load restaurant's saved categories
+    // Load restaurant's saved categories — sort client-side to avoid composite index
     const catQ = query(
       collection(db, 'menuCategories'),
       where('restaurantId', '==', restaurantId),
-      orderBy('order', 'asc')
     );
     const unsubCat = onSnapshot(catQ, snap => {
-      setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const cats = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      cats.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setCategories(cats);
     }, () => {});
 
+    // Load menu items — sort client-side to avoid composite index requirement
     const q = query(
       collection(db, 'menuItems'),
       where('restaurantId', '==', restaurantId),
-      orderBy('createdAt', 'desc')
     );
     const unsub = onSnapshot(q, snapshot => {
-      setMenuItems(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
+      items.sort((a, b) => {
+        const ta = a.createdAt?.toMillis?.() ?? a.createdAt ?? 0;
+        const tb = b.createdAt?.toMillis?.() ?? b.createdAt ?? 0;
+        return tb - ta;
+      });
+      setMenuItems(items);
       setLoading(false);
     }, () => {
       toast.error('Failed to load menu items');
@@ -109,11 +116,14 @@ export default function MenuManagement() {
     if (!restaurantId) return;
     setIsSubmitting(true);
 
-    let imageUrl = editTarget?.imageUrl || '';
+    let imageUrl = editTarget?.image || editTarget?.imageUrl || '';
     if (imageFile) {
       setUploadingImage(true);
       try {
-        imageUrl = await uploadToImgBB(imageFile);
+        const ext = imageFile.name.split('.').pop() || 'jpg';
+        const storageRef = ref(storage, `menuImages/${restaurantId}/${Date.now()}.${ext}`);
+        await uploadBytes(storageRef, imageFile);
+        imageUrl = await getDownloadURL(storageRef);
       } catch {
         toast.error('Image upload failed. Please try again.');
         setIsSubmitting(false);
@@ -140,7 +150,7 @@ export default function MenuManagement() {
           category: data.category,
           categoryId,
           isVeg: data.isVeg ?? false,
-          imageUrl,
+          image: imageUrl,
           updatedAt: serverTimestamp(),
         });
         toast.success('Menu item updated');
@@ -153,7 +163,7 @@ export default function MenuManagement() {
           category: data.category,
           categoryId,
           isVeg: data.isVeg ?? false,
-          imageUrl,
+          image: imageUrl,
           isAvailable: true,
           createdAt: serverTimestamp(),
         });
@@ -194,7 +204,7 @@ export default function MenuManagement() {
       category: item.category || '',
       isVeg: item.isVeg ?? false,
     });
-    setPreviewUrl(item.imageUrl || null);
+    setPreviewUrl(item.image || item.imageUrl || null);
     setImageFile(null);
     setShowUrlInput(false);
     setUrlInput('');
@@ -274,8 +284,8 @@ export default function MenuManagement() {
               >
                 <div className="flex gap-4">
                   <div className="w-20 h-20 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                    {item.imageUrl ? (
-                      <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                    {(item.image || item.imageUrl) ? (
+                      <img src={item.image || item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
                     ) : (
                       <ImageIcon className="w-8 h-8 text-gray-300" />
                     )}

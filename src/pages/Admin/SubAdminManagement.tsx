@@ -569,7 +569,37 @@ export default function SubAdminManagement() {
       }
     } catch (e: any) {
       if (e.code === 'auth/email-already-in-use') {
-        toast.error('This email already has a Firebase account. Use a different email or delete the old account first.');
+        // Email already in Firebase Auth — look up existing UID and create only Firestore records
+        try {
+          const res = await fetch('/api/get-uid-by-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: formEmail.trim().toLowerCase() }),
+          });
+          if (!res.ok) throw new Error('Could not look up existing user');
+          const { uid } = await res.json();
+          const permArray = permMapToArray(formPermsMap);
+          const base = {
+            name: formName.trim(), phone: formPhone.trim(), role: formRole,
+            status: formStatus, city: formCity.trim(),
+            permissions: permArray, permissionsMap: formPermsMap,
+          };
+          await setDoc(doc(db, 'subAdmins', uid), {
+            uid, email: formEmail.trim(), ...base, loginCount: 0,
+            createdAt: serverTimestamp(), createdBy: user?.email ?? 'admin',
+          });
+          await setDoc(doc(db, 'adminUsers', uid), {
+            email: formEmail.trim(), role: formRole, isSubAdmin: true,
+            permissions: permArray, permissionsMap: formPermsMap, city: formCity.trim(),
+          });
+          await logAuditEvent({ action: 'SUBADMIN_CREATED', entityType: 'subAdmin', entityId: uid,
+            entityName: formName.trim(), adminUid: user?.uid, adminName, adminEmail: user?.email,
+            details: { role: formRole, email: formEmail.trim(), existingAccount: true } });
+          setShowModal(false);
+          setCreatedCreds({ email: formEmail.trim(), password: '(existing account — use their password)', role: ROLE_CONFIG[formRole].label });
+        } catch {
+          toast.error('This email already exists and could not be linked. Check server logs.');
+        }
       } else {
         toast.error(e.message || 'Failed to save');
       }

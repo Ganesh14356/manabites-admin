@@ -2,9 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { useEffect as useMapEffect } from 'react';
+
+function AutoFitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  useMapEffect(() => {
+    if (points.length === 0) return;
+    const bounds = L.latLngBounds(points);
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+  }, [points.length]);
+  return null;
+}
 import { Search, Radar, Navigation, Phone, Clock, Package, BatteryMedium } from 'lucide-react';
 
 // ── Marker icons — green = available, red = busy (on delivery), gray = offline ──
@@ -201,6 +211,7 @@ export default function LiveRidersMap() {
             <MapContainer center={[17.385, 78.4867]} zoom={12} style={{ height: '100%', width: '100%' }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' />
+              <AutoFitBounds points={filtered.map(r => [r.lat, r.lng] as [number, number])} />
               {filtered.map(r => {
                 const status = deriveStatus(r);
                 const meta = STATUS_META[status];

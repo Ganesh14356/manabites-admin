@@ -14,13 +14,13 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-const FIRESTORE_DB = 'manabites';
+const FIRESTORE_DB = '(default)';
 
 function ensureInit() {
   if (getApps().length > 0) return;
   initializeApp({
     credential: cert({
-      projectId:   (process.env.FIREBASE_PROJECT_ID   || 'manabites-f3664').trim(),
+      projectId:   (process.env.FIREBASE_PROJECT_ID   || 'manabites2-6538e').trim(),
       clientEmail: (process.env.FIREBASE_CLIENT_EMAIL || '').trim(),
       privateKey:  (process.env.FIREBASE_PRIVATE_KEY || '')
         .replace(/^﻿/, '')

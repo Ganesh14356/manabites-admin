@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import {
   collection, doc, updateDoc, addDoc,
   onSnapshot, query, orderBy, Timestamp, serverTimestamp, getDocs,
+  writeBatch, increment,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { DollarSign, CheckCircle, Clock, Store, Bike, RefreshCw, Plus, X, AlertTriangle } from 'lucide-react';
@@ -89,16 +90,58 @@ export default function Payouts() {
     if (!markingPaid) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'payouts', markingPaid.id), {
+      const { entityId, entityType, amount } = markingPaid;
+      const paidAt = serverTimestamp();
+      const batch = writeBatch(db);
+
+      // 1. Mark the payout as paid
+      batch.update(doc(db, 'payouts', markingPaid.id), {
         status: 'paid',
         transactionId: txId || null,
-        paidAt: serverTimestamp(),
+        paidAt,
       });
-      toast.success('Payout marked as paid');
+
+      const historyEntry = {
+        type: 'payout_settled',
+        amount,
+        transactionId: txId || null,
+        description: `Payout of ₹${amount.toLocaleString('en-IN')} settled by admin`,
+        createdAt: paidAt,
+      };
+
+      if (entityType === 'rider') {
+        // 2a. Deduct from rider wallet (earnings field in riders doc)
+        batch.update(doc(db, 'riders', entityId), {
+          earnings: increment(-amount),
+          updatedAt: Date.now(),
+        });
+        // 2b. Deduct from riderEarnings.pendingPayout
+        batch.set(doc(db, 'riderEarnings', entityId), {
+          pendingPayout: increment(-amount),
+          updatedAt: paidAt,
+        }, { merge: true });
+        // 2c. Add history entry visible to rider
+        batch.set(doc(collection(db, 'riderEarnings', entityId, 'history')), historyEntry);
+
+      } else if (entityType === 'restaurant') {
+        // 3a. Deduct from restaurantEarnings.pendingPayout
+        batch.set(doc(db, 'restaurantEarnings', entityId), {
+          pendingPayout: increment(-amount),
+          updatedAt: paidAt,
+        }, { merge: true });
+        // 3b. Add history entry visible to restaurant
+        batch.set(doc(collection(db, 'restaurantEarnings', entityId, 'history')), historyEntry);
+      }
+
+      await batch.commit();
+      toast.success(`Payout of ₹${amount.toLocaleString('en-IN')} marked as paid`);
       setMarkingPaid(null);
       setTxId('');
-    } catch { toast.error('Failed to update payout'); }
-    finally { setSaving(false); }
+    } catch (e: any) {
+      toast.error('Failed to update payout: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCreatePayout = async () => {
