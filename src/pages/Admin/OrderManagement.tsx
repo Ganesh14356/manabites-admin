@@ -1,10 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { OrderId } from '../../components/OrderId';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
-  collection, doc, updateDoc, getDocs,
-  onSnapshot, query, orderBy, where, Timestamp
+  collection, doc, updateDoc, getDocs, getDoc,
+  onSnapshot, query, orderBy, where, limit, Timestamp
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
@@ -21,7 +21,7 @@ interface OrderDoc {
   restaurantName: string;
   riderId?: string;
   riderName?: string;
-  status: 'pending' | 'accepted' | 'preparing' | 'ready' | 'picked_up' | 'delivered' | 'cancelled' | 'customer_unavailable';
+  status: 'pending' | 'accepted' | 'preparing' | 'ready' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'customer_unavailable';
   totalAmount: number;
   deliveryFee: number;
   platformFee: number;
@@ -72,14 +72,22 @@ export default function OrderManagement() {
   const [riders, setRiders] = useState<RiderOption[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assigningRider, setAssigningRider] = useState(false);
+  const assigningRef = useRef(false);
   const [selectedRiderId, setSelectedRiderId] = useState('');
 
   // Rapido manual booking state
-  const [rapidoForm, setRapidoForm] = useState({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '' });
+  const [rapidoForm, setRapidoForm] = useState({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '', deliveryOtp: '' });
   const [savingRapido, setSavingRapido] = useState(false);
+  const [restaurantPhone, setRestaurantPhone] = useState<string>('');
+
+  // Reset Rapido form when a different order is opened; pre-fill existing OTP
+  useEffect(() => {
+    const existingOtp = (selectedOrder as any)?.deliveryOtp ?? '';
+    setRapidoForm({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '', deliveryOtp: existingOtp });
+  }, [selectedOrderId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(200));
     const unsub = onSnapshot(q, snapshot => {
       setOrders(snapshot.docs.map(d => {
         const data = d.data() as Record<string, any>;
@@ -89,11 +97,23 @@ export default function OrderManagement() {
           // normalize field name variants written by different apps
           customerName: data.customerName || data.name || '—',
           totalAmount:  data.totalAmount ?? data.total ?? data.orderAmount ?? 0,
-          deliveryAddress: typeof data.deliveryAddress === 'string'
-            ? data.deliveryAddress
-            : data.deliveryAddress
-              ? [data.deliveryAddress.street, data.deliveryAddress.city, data.deliveryAddress.state, data.deliveryAddress.pincode].filter(Boolean).join(', ')
-              : data.address || '—',
+          deliveryAddress: (() => {
+            const da = data.deliveryAddress;
+            const cleanAddr = (s: string) =>
+              s.replace(/\b[A-Z0-9]{4}\+[A-Z0-9]{2,}\b,?\s*/g, '').replace(/,\s*,/g, ',').trim().replace(/^,|,$/g, '').trim();
+            if (typeof da === 'string' && da) return cleanAddr(da);
+            if (da && typeof da === 'object') {
+              const parts = [
+                da.street || da.address || da.line1 || '',
+                da.area || da.locality || '',
+                da.city || '',
+                da.state || '',
+                da.pincode || da.zip || '',
+              ].filter(Boolean).join(', ');
+              return cleanAddr(parts);
+            }
+            return cleanAddr(data.customerAddress || data.address || '—');
+          })(),
           items: (data.items || []).map((item: any) => ({
             ...item,
             quantity: item.quantity ?? item.qty ?? 1,
@@ -109,6 +129,22 @@ export default function OrderManagement() {
     return () => unsub();
   }, []);
 
+  const [restaurantAddress, setRestaurantAddress] = useState<string>('');
+
+  // Fetch restaurant phone + address when order is selected
+  useEffect(() => {
+    setRestaurantPhone('');
+    setRestaurantAddress('');
+    if (!selectedOrder?.restaurantId) return;
+    getDoc(doc(db, 'restaurants', selectedOrder.restaurantId)).then(snap => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setRestaurantPhone(data.phone || data.ownerPhone || data.contactPhone || '');
+        setRestaurantAddress(data.address || data.fullAddress || data.location?.address || '');
+      }
+    });
+  }, [selectedOrder?.restaurantId]);
+
   // Fetch active riders from the riders collection (keyed by phone number)
   useEffect(() => {
     getDocs(query(collection(db, 'riders'), where('approvalStatus', '==', 'approved'))).then(snap => {
@@ -119,6 +155,7 @@ export default function OrderManagement() {
             name: d.data().name || '—',
             phone: d.data().phone || d.id,
             vehicleType: d.data().vehicle || d.data().vehicleType,
+            fcmToken: d.data().fcmToken || null,
           }))
           .filter(r => r.name !== '—')
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -128,25 +165,54 @@ export default function OrderManagement() {
 
   const handleAssignRider = async () => {
     if (!selectedOrder || !selectedRiderId) return;
+    if (assigningRef.current) return; // prevent double-submit
     const rider = riders.find(r => r.uid === selectedRiderId);
     if (!rider) return;
+    assigningRef.current = true;
     setAssigningRider(true);
     try {
-      // Set assignedRiderId so the rider app shows the accept/reject popup.
-      // Do NOT set riderId or change status yet — rider must confirm first.
       const assignmentExpiry = Date.now() + 5 * 60 * 1000; // 5 minutes to accept
+
+      // If a previous rider had already accepted (riderId set) or the order is in a
+      // post-accept terminal state, we must clear the old rider and reset status to
+      // 'ready' so the new rider can accept. Without this, useOrderAssignment filters
+      // the order as terminal and the assignment popup never appears.
+      const postAcceptStatuses = ['out_for_delivery', 'picked_up'];
+      const needsReset = !!selectedOrder.riderId || postAcceptStatuses.includes(selectedOrder.status);
+
       await updateDoc(doc(db, 'orders', selectedOrder.id), {
         assignedRiderId:   rider.uid,
         assignedRiderName: rider.name,
         assignmentExpiry,
+        ...(needsReset ? {
+          riderId:   null,
+          riderName: null,
+          riderPhone: null,
+          status:    'ready',
+        } : {}),
         updatedAt: Timestamp.now(),
       });
+      // Send FCM push so rider app shows the assignment popup immediately
+      fetch('/api/notify-rider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          riderId:  rider.uid,
+          fcmToken: (rider as any).fcmToken || null,
+          orderId:  selectedOrder.id,
+          type:     'delivery_request',
+          sentAt:   Date.now(),
+          title:    '🛵 New Delivery Request!',
+          body:     `Order #${selectedOrder.id.slice(-6)} assigned by admin — tap to accept!`,
+        }),
+      }).catch(() => {});
       toast.success(`Rider "${rider.name}" notified — waiting for acceptance`);
       setShowAssignModal(false);
       setSelectedRiderId('');
     } catch {
       toast.error('Failed to assign rider');
     } finally {
+      assigningRef.current = false;
       setAssigningRider(false);
     }
   };
@@ -194,7 +260,12 @@ export default function OrderManagement() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ orderId, cancelledBy: 'admin', cancellationReason: 'Admin cancelled' }),
-      }).catch(() => {});
+      }).then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          toast.error(`Refund failed: ${e.error || r.status}`);
+        }
+      }).catch(() => toast.error('Refund request failed — check server logs'));
       toast.success('Order cancelled and refund triggered');
       setSelectedOrderId(null);
     } catch {
@@ -219,7 +290,8 @@ export default function OrderManagement() {
         deliverySource: 'rapido_manual',
         updatedAt: Timestamp.now(),
       };
-      if (rapidoForm.pickupOtp)   updates.rapidoPickupOtp   = rapidoForm.pickupOtp.trim();
+      if (rapidoForm.pickupOtp)   updates.pickupOtp = rapidoForm.pickupOtp.trim();
+      if (rapidoForm.deliveryOtp) updates.deliveryOtp     = rapidoForm.deliveryOtp.trim();
       if (rapidoForm.captainName || rapidoForm.captainPhone) {
         updates.rapidoRider = {
           name:  rapidoForm.captainName.trim()  || 'Rapido Captain',
@@ -233,8 +305,25 @@ export default function OrderManagement() {
         updates.pickedUpAt = Timestamp.now();
       }
       await updateDoc(doc(db, 'orders', selectedOrder.id), updates);
-      toast.success('Rapido details saved — restaurant + customer notified ✅');
-      setRapidoForm({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '' });
+
+      // Send push notification to customer when captain is on the way
+      if (updates.status === 'out_for_delivery') {
+        const captainName = rapidoForm.captainName.trim() || 'Rapido Captain';
+        fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId:  selectedOrder.customerId,
+            orderId: selectedOrder.id,
+            title:   '🛵 Your order is on the way!',
+            body:    `${captainName} is delivering your order. ${rapidoForm.deliveryOtp ? `Delivery OTP: ${rapidoForm.deliveryOtp.trim()}` : ''}`.trim(),
+            type:    'order_update',
+          }),
+        }).catch(() => {});
+      }
+
+      toast.success('Rapido details saved ✅');
+      setRapidoForm({ pickupOtp: '', captainName: '', captainPhone: '', trackingUrl: '', deliveryOtp: (selectedOrder as any).deliveryOtp ?? '' });
     } catch {
       toast.error('Failed to save Rapido details');
     } finally {
@@ -268,7 +357,7 @@ export default function OrderManagement() {
     switch (status) {
       case 'pending': return 'bg-yellow-100 text-yellow-800';
       case 'accepted': case 'preparing': case 'ready': return 'bg-blue-100 text-blue-800';
-      case 'picked_up': return 'bg-purple-100 text-purple-800';
+      case 'picked_up': case 'out_for_delivery': return 'bg-purple-100 text-purple-800';
       case 'delivered': return 'bg-green-100 text-green-800';
       case 'cancelled': return 'bg-red-100 text-red-800';
       case 'customer_unavailable': return 'bg-red-100 text-red-800 animate-pulse';
@@ -341,8 +430,11 @@ export default function OrderManagement() {
         >
           <option value="all">All Status</option>
           <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
           <option value="preparing">Preparing</option>
+          <option value="ready">Ready</option>
           <option value="picked_up">Picked Up</option>
+          <option value="out_for_delivery">Out for Delivery</option>
           <option value="delivered">Delivered</option>
           <option value="cancelled">Cancelled</option>
           <option value="customer_unavailable">Customer Unavailable</option>
@@ -395,7 +487,7 @@ export default function OrderManagement() {
                       <td className="table-cell font-medium">₹{o.totalAmount?.toFixed(2) || '0.00'}</td>
                       <td className="table-cell">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${getStatusColor(o.status)}`}>
-                          {o.status === 'customer_unavailable' ? '🚨 Rider Waiting' : o.status.replace('_', ' ')}
+                          {o.status === 'customer_unavailable' ? '🚨 Rider Waiting' : o.status === 'out_for_delivery' ? 'Out for Delivery' : o.status.replace(/_/g, ' ')}
                         </span>
                       </td>
                       <td className="table-cell text-gray-500 text-xs">{formatDate(o.createdAt)}</td>
@@ -455,6 +547,196 @@ export default function OrderManagement() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* ── Rapido Manual Booking ─────────────────────────── */}
+                {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
+                  <div className="border-2 border-yellow-300 bg-yellow-50 rounded-2xl p-4 space-y-4">
+                    <p className="text-xs font-black text-yellow-700 uppercase tracking-widest">🛵 Rapido Manual Booking</p>
+
+                    {/* STEP 1 — Locations */}
+                    <div className="bg-white rounded-xl p-3 space-y-2 border border-yellow-100">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 1 — Locations చూడు</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-black text-blue-500 uppercase">🍽️ Pickup</p>
+                          <p className="text-xs font-bold text-gray-700 leading-tight">{selectedOrder.restaurantName}</p>
+                          {restaurantAddress && <p className="text-[10px] text-gray-400 leading-tight">{restaurantAddress}</p>}
+                          {restaurantPhone && <a href={`tel:${restaurantPhone}`} className="text-xs font-black text-blue-600 block">{restaurantPhone}</a>}
+                          {(selectedOrder as any).restaurantLat && (
+                            <a href={`https://maps.google.com/?q=${(selectedOrder as any).restaurantLat},${(selectedOrder as any).restaurantLng}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-500 underline">📍 Map చూడు</a>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[9px] font-black text-green-500 uppercase">🏠 Drop</p>
+                          <p className="text-xs font-bold text-gray-700 leading-tight">{selectedOrder.customerName}</p>
+                          <p className="text-[10px] text-gray-400 leading-tight">{selectedOrder.deliveryAddress}</p>
+                          {(selectedOrder as any).customerPhone && <a href={`tel:${(selectedOrder as any).customerPhone}`} className="text-xs font-black text-green-600 block">{(selectedOrder as any).customerPhone}</a>}
+                          {(selectedOrder as any).customerLat && (
+                            <a href={`https://maps.google.com/?q=${(selectedOrder as any).customerLat},${(selectedOrder as any).customerLng}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-green-500 underline">📍 Map చూడు</a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* STEP 2 — Book on Rapido */}
+                    <div className="bg-white rounded-xl p-3 space-y-2 border border-yellow-100">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 2 — Rapido లో Book చేయి</p>
+                      <p className="text-[10px] text-red-600 font-bold bg-red-50 rounded-lg px-2 py-1">⚠️ "Bike Ride" కాదు — "Parcel" option select చేయి!</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => {
+                            const addr = `${selectedOrder.restaurantName}${restaurantAddress ? ', ' + restaurantAddress : ''}`.trim();
+                            navigator.clipboard.writeText(addr).then(() => toast.success('Pickup address copied!'));
+                          }}
+                          className="py-2 bg-blue-50 text-blue-700 font-black rounded-xl text-[10px] hover:bg-blue-100 border border-blue-200"
+                        >
+                          📋 Copy Pickup
+                        </button>
+                        <button
+                          onClick={() => {
+                            const custPhone = (selectedOrder as any).customerPhone || '';
+                            const addr = `${selectedOrder.deliveryAddress || ''}${custPhone ? ' Ph:' + custPhone : ''}`;
+                            navigator.clipboard.writeText(addr).then(() => toast.success('Drop address + phone copied!'));
+                          }}
+                          className="py-2 bg-green-50 text-green-700 font-black rounded-xl text-[10px] hover:bg-green-100 border border-green-200"
+                        >
+                          📋 Copy Drop + Ph
+                        </button>
+                      </div>
+                      <a
+                        href="https://m.rapido.bike"
+                        target="_blank" rel="noopener noreferrer"
+                        className="block w-full py-2.5 bg-black text-white font-black rounded-xl text-xs text-center hover:bg-gray-900"
+                      >
+                        🛵 Open Rapido — Parcel Book చేయి
+                      </a>
+                    </div>
+
+                    {/* STEP 3 — After booking enter details */}
+                    <div className="bg-white rounded-xl p-3 space-y-2 border border-yellow-100">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 3 — Captain Details Enter చేయి</p>
+
+                      {/* Delivery OTP for customer */}
+                      <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 space-y-1.5">
+                        <p className="text-[10px] font-black text-orange-600 uppercase">🔑 Delivery OTP — Customer కి show అవుతుంది</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text" inputMode="numeric" maxLength={6}
+                            placeholder="e.g. 7823"
+                            value={rapidoForm.deliveryOtp}
+                            onChange={e => setRapidoForm(f => ({ ...f, deliveryOtp: e.target.value }))}
+                            className="flex-1 px-3 py-2 rounded-xl border border-orange-200 text-sm font-mono font-black bg-white focus:outline-none focus:ring-2 focus:ring-orange-400 tracking-widest"
+                          />
+                          <button
+                            onClick={() => {
+                              const otp = String(1000 + Math.floor(Math.random() * 9000));
+                              setRapidoForm(f => ({ ...f, deliveryOtp: otp }));
+                            }}
+                            className="px-3 py-2 bg-orange-100 text-orange-700 font-black rounded-xl text-xs hover:bg-orange-200"
+                          >Generate</button>
+                        </div>
+                        <p className="text-[9px] text-orange-500">Rider customer దగ్గర ఈ OTP అడుగుతాడు → delivery confirm</p>
+                      </div>
+
+                      <input
+                        type="text" inputMode="numeric" maxLength={6}
+                        placeholder="Pickup OTP (restaurant కి — e.g. 4521)"
+                        value={rapidoForm.pickupOtp}
+                        onChange={e => setRapidoForm(f => ({ ...f, pickupOtp: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm font-mono font-black bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Captain Name"
+                        value={rapidoForm.captainName}
+                        onChange={e => setRapidoForm(f => ({ ...f, captainName: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Captain Phone"
+                        value={rapidoForm.captainPhone}
+                        onChange={e => setRapidoForm(f => ({ ...f, captainPhone: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <input
+                        type="url"
+                        placeholder="Tracking URL (optional)"
+                        value={rapidoForm.trackingUrl}
+                        onChange={e => setRapidoForm(f => ({ ...f, trackingUrl: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                      />
+                      <button
+                        onClick={handleSaveRapidoDetails}
+                        disabled={savingRapido || (!rapidoForm.pickupOtp && !rapidoForm.captainName && !rapidoForm.deliveryOtp)}
+                        className="w-full py-2.5 bg-green-500 text-white font-black rounded-xl text-sm hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        {savingRapido ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                        Save & Notify Restaurant + Customer
+                      </button>
+                    </div>
+
+                    {/* STEP 4 — WhatsApp Captain */}
+                    {(rapidoForm.captainPhone || (selectedOrder as any).rapidoRider?.phone) && (
+                      <div className="bg-white rounded-xl p-3 border border-yellow-100 space-y-2">
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 4 — Captain కి WhatsApp పంపు</p>
+                        {(() => {
+                          const captPhone = rapidoForm.captainPhone || (selectedOrder as any).rapidoRider?.phone || '';
+                          const custPhone = (selectedOrder as any).customerPhone || '';
+                          const restLat = (selectedOrder as any).restaurantLat;
+                          const restLng = (selectedOrder as any).restaurantLng;
+                          const custLat = (selectedOrder as any).customerLat;
+                          const custLng = (selectedOrder as any).customerLng;
+                          const msg = encodeURIComponent(`🛵 ManaBites Delivery
+
+📍 PICKUP: ${selectedOrder.restaurantName}
+${restaurantAddress || ''}
+Ph: ${restaurantPhone || ''}
+${restLat && restLng ? `Maps: https://maps.google.com/?q=${restLat},${restLng}` : ''}
+
+🏠 DROP: ${selectedOrder.customerName}
+${selectedOrder.deliveryAddress || ''}
+Ph: ${custPhone}
+${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` : ''}`);
+                          return (
+                            <a
+                              href={`https://wa.me/91${captPhone.replace(/\D/g,'')}?text=${msg}`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-2 w-full py-2.5 bg-green-500 text-white font-black rounded-xl text-xs hover:bg-green-600"
+                            >
+                              💬 WhatsApp Captain — Delivery Details Send
+                            </a>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* STEP 5 — Mark Delivered */}
+                    {(selectedOrder.status === 'out_for_delivery' || selectedOrder.status === 'picked_up') && (
+                      <div className="bg-white rounded-xl p-3 border border-yellow-100 space-y-2">
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 5 — Delivered అయిన తర్వాత</p>
+                        <button
+                          onClick={() => handleMarkDelivered(selectedOrder.id)}
+                          className="w-full py-2.5 bg-brand text-white font-black rounded-xl text-sm hover:bg-orange-600 flex items-center justify-center gap-2"
+                        >
+                          ✅ Mark Delivered
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Show saved info */}
+                    {((selectedOrder as any).pickupOtp || (selectedOrder as any).rapidoRider?.name) && (
+                      <div className="bg-white rounded-xl px-3 py-2 space-y-1 border border-yellow-100">
+                        {(selectedOrder as any).pickupOtp && (
+                          <p className="text-xs font-bold text-gray-700">🔑 Pickup OTP: <span className="font-mono text-base text-yellow-700">{(selectedOrder as any).pickupOtp}</span></p>
+                        )}
+                        {(selectedOrder as any).rapidoRider?.name && (
+                          <p className="text-xs font-bold text-gray-700">🛵 Captain: {(selectedOrder as any).rapidoRider.name} · {(selectedOrder as any).rapidoRider.phone || '—'}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Status */}
                 <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between">
                   <div>
@@ -547,115 +829,6 @@ export default function OrderManagement() {
                   </div>
                 </div>
 
-                {/* ── Rapido Manual Booking ─────────────────────────── */}
-                {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
-                  <div className="border border-yellow-200 bg-yellow-50 rounded-2xl p-4 space-y-3">
-                    <p className="text-xs font-black text-yellow-700 uppercase tracking-widest">🛵 Rapido Manual Booking</p>
-
-                    {/* Maps + Copy */}
-                    <div className="space-y-2">
-                      {(selectedOrder as any).restaurantLat && (
-                        <a
-                          href={`https://maps.google.com/?q=${(selectedOrder as any).restaurantLat},${(selectedOrder as any).restaurantLng}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-xs font-bold text-blue-600 bg-white rounded-xl px-3 py-2 border border-blue-100"
-                        >
-                          <MapPin className="w-3 h-3" /> 📍 Restaurant Location (Pickup)
-                        </a>
-                      )}
-                      {(selectedOrder as any).customerLat && (
-                        <a
-                          href={`https://maps.google.com/?q=${(selectedOrder as any).customerLat},${(selectedOrder as any).customerLng}`}
-                          target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-2 text-xs font-bold text-green-600 bg-white rounded-xl px-3 py-2 border border-green-100"
-                        >
-                          <MapPin className="w-3 h-3" /> 🏠 Customer Location (Drop)
-                        </a>
-                      )}
-                      <button
-                        onClick={() => {
-                          const text = `Pickup: ${selectedOrder.restaurantName}, ${(selectedOrder as any).restaurantAddress || ''} | Ph: ${(selectedOrder as any).restaurantPhone || ''}
-Drop: ${selectedOrder.customerName}, ${selectedOrder.deliveryAddress} | Ph: ${(selectedOrder as any).customerPhone || ''}`;
-                          navigator.clipboard.writeText(text).then(() => toast.success('Addresses copied! Paste in Rapido app'));
-                        }}
-                        className="w-full py-2 bg-yellow-400 text-black font-black rounded-xl text-xs hover:bg-yellow-500 flex items-center justify-center gap-2"
-                      >
-                        📋 Copy Addresses + Open Rapido
-                      </button>
-                      <a
-                        href="https://rapido.bike"
-                        target="_blank" rel="noopener noreferrer"
-                        className="block w-full py-2 bg-black text-white font-black rounded-xl text-xs text-center hover:bg-gray-900"
-                      >
-                        🛵 Open Rapido App / Website
-                      </a>
-                    </div>
-
-                    {/* After booking — enter captain details */}
-                    <div className="border-t border-yellow-200 pt-3 space-y-2">
-                      <p className="text-[10px] font-black text-yellow-600 uppercase">After Booking — Enter Details:</p>
-                      <input
-                        type="text" inputMode="numeric" maxLength={6}
-                        placeholder="Pickup OTP (e.g. 4521)"
-                        value={rapidoForm.pickupOtp}
-                        onChange={e => setRapidoForm(f => ({ ...f, pickupOtp: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm font-mono font-black bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Captain Name"
-                        value={rapidoForm.captainName}
-                        onChange={e => setRapidoForm(f => ({ ...f, captainName: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      />
-                      <input
-                        type="tel"
-                        placeholder="Captain Phone"
-                        value={rapidoForm.captainPhone}
-                        onChange={e => setRapidoForm(f => ({ ...f, captainPhone: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      />
-                      <input
-                        type="url"
-                        placeholder="Tracking URL (optional)"
-                        value={rapidoForm.trackingUrl}
-                        onChange={e => setRapidoForm(f => ({ ...f, trackingUrl: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-xl border border-yellow-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                      />
-                      <button
-                        onClick={handleSaveRapidoDetails}
-                        disabled={savingRapido || (!rapidoForm.pickupOtp && !rapidoForm.captainName)}
-                        className="w-full py-2.5 bg-green-500 text-white font-black rounded-xl text-sm hover:bg-green-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {savingRapido ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                        Save & Notify Restaurant + Customer
-                      </button>
-                    </div>
-
-                    {/* Mark Delivered */}
-                    {selectedOrder.status === 'out_for_delivery' && (
-                      <button
-                        onClick={() => handleMarkDelivered(selectedOrder.id)}
-                        className="w-full py-2.5 bg-brand text-white font-black rounded-xl text-sm hover:bg-orange-600 flex items-center justify-center gap-2"
-                      >
-                        ✅ Mark Delivered
-                      </button>
-                    )}
-
-                    {/* Show saved Rapido info */}
-                    {(selectedOrder as any).rapidoPickupOtp && (
-                      <div className="bg-white rounded-xl px-3 py-2 text-xs font-bold text-gray-700 border border-yellow-100">
-                        🔑 Pickup OTP: <span className="font-mono text-lg text-yellow-700">{(selectedOrder as any).rapidoPickupOtp}</span>
-                      </div>
-                    )}
-                    {(selectedOrder as any).rapidoRider?.name && (
-                      <div className="bg-white rounded-xl px-3 py-2 text-xs font-bold text-gray-700 border border-yellow-100">
-                        🛵 Captain: {(selectedOrder as any).rapidoRider.name} · {(selectedOrder as any).rapidoRider.phone || '—'}
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 {/* Items */}
                 <div>
                   <h3 className="text-sm font-bold text-gray-800 mb-3 border-b pb-2">Order Items</h3>
@@ -670,24 +843,49 @@ Drop: ${selectedOrder.customerName}, ${selectedOrder.deliveryAddress} | Ph: ${(s
                 </div>
 
                 {/* Bill */}
-                <div className="bg-gray-50 p-4 rounded-xl space-y-2 text-sm">
-                  <div className="flex justify-between text-gray-600">
-                    <span>Item Total</span>
-                    <span>₹{(selectedOrder.totalAmount - (selectedOrder.deliveryFee || 0) - (selectedOrder.tax || 0) - (selectedOrder.platformFee || 0)).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>Delivery Fee</span>
-                    <span>₹{(selectedOrder.deliveryFee || 0).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>Taxes & Platform Fee</span>
-                    <span>₹{((selectedOrder.tax || 0) + (selectedOrder.platformFee || 0)).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-gray-800 pt-2 border-t border-gray-200">
-                    <span>Grand Total</span>
-                    <span>₹{selectedOrder.totalAmount?.toFixed(2)}</span>
-                  </div>
-                </div>
+                {(() => {
+                  const o = selectedOrder as any;
+                  const walletDiscount = o.walletDiscount ?? 0;
+                  const couponDiscount = o.couponDiscount ?? o.discount ?? 0;
+                  const itemTotal = selectedOrder.totalAmount
+                    - (selectedOrder.deliveryFee || 0)
+                    - (selectedOrder.tax || 0)
+                    - (selectedOrder.platformFee || 0)
+                    + walletDiscount
+                    + couponDiscount;
+                  return (
+                    <div className="bg-gray-50 p-4 rounded-xl space-y-2 text-sm">
+                      <div className="flex justify-between text-gray-600">
+                        <span>Item Total</span>
+                        <span>₹{itemTotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-600">
+                        <span>Delivery Fee</span>
+                        <span>₹{(selectedOrder.deliveryFee || 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-gray-600">
+                        <span>Taxes & Platform Fee</span>
+                        <span>₹{((selectedOrder.tax || 0) + (selectedOrder.platformFee || 0)).toFixed(2)}</span>
+                      </div>
+                      {walletDiscount > 0 && (
+                        <div className="flex justify-between text-green-600">
+                          <span>Wallet Discount</span>
+                          <span>−₹{walletDiscount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {couponDiscount > 0 && (
+                        <div className="flex justify-between text-green-600">
+                          <span>Coupon Discount{o.couponCode ? ` (${o.couponCode})` : ''}</span>
+                          <span>−₹{couponDiscount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-bold text-gray-800 pt-2 border-t border-gray-200">
+                        <span>Grand Total</span>
+                        <span>₹{selectedOrder.totalAmount?.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Delivery Verification */}
                 <div>
