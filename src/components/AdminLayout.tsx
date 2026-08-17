@@ -24,6 +24,7 @@ const BASE_NAV = [
   { name: 'Restaurants',          path: '/admin/restaurants',          icon: Store      },
   { name: 'Approvals',            path: '/admin/restaurants-approval', icon: ShieldCheck },
   { name: 'Riders',               path: '/admin/riders',               icon: Bike       },
+  { name: 'Bazaar Products',      path: '/admin/bazaar-products',      icon: ShoppingBag },
   { name: 'Rider Approvals',      path: '/admin/rider-approvals',      icon: ShieldCheck },
   { name: 'Live Map',             path: '/admin/live-map',             icon: MapPin      },
   { name: 'Live Riders Map',      path: '/admin/rider-map',            icon: Radar       },

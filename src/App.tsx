@@ -19,6 +19,7 @@ import LunchSpecials from './pages/Admin/LunchSpecials';
 import RestaurantApproval from './pages/Admin/RestaurantApproval';
 import RazorpayPayments from './pages/Admin/RazorpayPayments';
 import RiderManagement from './pages/Admin/RiderManagement';
+import BazaarProducts from './pages/Admin/BazaarProducts';
 import RiderApproval from './pages/Admin/RiderApproval';
 import LiveOrdersMap from './pages/Admin/LiveOrdersMap';
 import LiveRidersMap from './pages/Admin/LiveRidersMap';
@@ -108,6 +109,7 @@ export default function App() {
                 <Route path="razorpay" element={<RazorpayPayments />} />
                 <Route path="settings" element={<DeliveryFeeSettings />} />
                 <Route path="riders" element={<RiderManagement />} />
+                <Route path="bazaar-products" element={<BazaarProducts />} />
                 <Route path="rider-approvals" element={<RiderApproval />} />
                 <Route path="live-map" element={<LiveOrdersMap />} />
                 <Route path="rider-map" element={<LiveRidersMap />} />
