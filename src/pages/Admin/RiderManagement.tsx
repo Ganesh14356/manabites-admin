@@ -10,7 +10,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import {
-  collection, doc, setDoc, updateDoc, deleteDoc, query, where,
+  collection, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where,
   onSnapshot, orderBy, getDocs, Timestamp, serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db, secondaryAuth } from '../../firebase';
@@ -690,6 +690,33 @@ export default function RiderManagement() {
     setFormError(null);
     try {
       if (editTarget) {
+        // Rider app login is keyed by riders/{phone} (doc ID derived from the Auth
+        // phone number), not a queryable field — so a phone-number edit has to move
+        // the document to the new ID, or the rider's real profile/approval status
+        // becomes unreachable from their new number.
+        if (data.phone !== editTarget.phone) {
+          const [oldRiderSnap, newRiderSnap] = await Promise.all([
+            getDoc(doc(db, 'riders', editTarget.phone)),
+            getDoc(doc(db, 'riders', data.phone)),
+          ]);
+          if (newRiderSnap.exists()) {
+            throw new Error(`Phone ${data.phone} is already used by another rider (${newRiderSnap.data()?.name || 'unknown'}). Choose a different number.`);
+          }
+          if (oldRiderSnap.exists()) {
+            await setDoc(doc(db, 'riders', data.phone), {
+              ...oldRiderSnap.data(),
+              phone: data.phone,
+              riderId: data.phone,
+              name: data.name,
+              vehicleType: data.vehicleType,
+              vehicleNumber: data.vehicleNumber,
+              licenseNumber: data.licenseNumber || null,
+              updatedAt: serverTimestamp(),
+            });
+            await deleteDoc(doc(db, 'riders', editTarget.phone));
+          }
+        }
+
         await updateDoc(doc(db, 'users', editTarget.uid), {
           name: data.name, phone: data.phone,
           vehicleType: data.vehicleType, vehicleNumber: data.vehicleNumber,
