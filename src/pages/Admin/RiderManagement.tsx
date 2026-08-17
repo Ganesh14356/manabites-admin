@@ -690,10 +690,10 @@ export default function RiderManagement() {
     setFormError(null);
     try {
       if (editTarget) {
-        // Rider app login is keyed by riders/{phone} (doc ID derived from the Auth
-        // phone number), not a queryable field — so a phone-number edit has to move
-        // the document to the new ID, or the rider's real profile/approval status
-        // becomes unreachable from their new number.
+        // Rider app reads its own profile from riders/{phone} (doc ID derived from
+        // the Auth phone number, not a queryable field) — updateDoc below only
+        // touches users/{uid}, so without this mirror, name/vehicle/license edits
+        // silently never reach what the rider app actually displays.
         if (data.phone !== editTarget.phone) {
           const [oldRiderSnap, newRiderSnap] = await Promise.all([
             getDoc(doc(db, 'riders', editTarget.phone)),
@@ -714,6 +714,17 @@ export default function RiderManagement() {
               updatedAt: serverTimestamp(),
             });
             await deleteDoc(doc(db, 'riders', editTarget.phone));
+          }
+        } else {
+          const currentRiderSnap = await getDoc(doc(db, 'riders', data.phone));
+          if (currentRiderSnap.exists()) {
+            await setDoc(doc(db, 'riders', data.phone), {
+              name: data.name,
+              vehicleType: data.vehicleType,
+              vehicleNumber: data.vehicleNumber,
+              licenseNumber: data.licenseNumber || null,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
           }
         }
 
