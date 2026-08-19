@@ -1007,16 +1007,17 @@ function EditRestaurantModal({
                           className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-500 text-xs font-bold">
                           Cancel
                         </button>
-                        <button type="button" disabled={changingPass || newPassword.length < 6}
+                        <button type="button" disabled={changingPass || newPassword.trim().length < 6}
                           onClick={async () => {
-                            if (!restaurant || newPassword.length < 6) return;
+                            const trimmedPassword = newPassword.trim();
+                            if (!restaurant || trimmedPassword.length < 6) return;
                             setChangingPass(true);
                             try {
                               const idToken = await auth.currentUser?.getIdToken();
                               const res = await fetch('https://manabites.in/api/admin/create-restaurant-login', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-                                body: JSON.stringify({ restaurantId: restaurant.id, email: restaurant.email, password: newPassword }),
+                                body: JSON.stringify({ restaurantId: restaurant.id, email: restaurant.email, password: trimmedPassword }),
                               });
                               const data = await res.json();
                               if (!res.ok) throw new Error(data.error || 'Failed');
