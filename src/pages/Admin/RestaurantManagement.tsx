@@ -1012,11 +1012,7 @@ function EditRestaurantModal({
                             if (!restaurant || newPassword.length < 6) return;
                             setChangingPass(true);
                             try {
-                              const { getFunctions, httpsCallable } = await import('firebase/functions');
-                              // Update via Firestore directly (admin has write access)
-                              const { doc: fsDoc, updateDoc: fsUpdate, getFirestore: fsGetFirestore } = await import('firebase/firestore');
-                              const { getAuth: fsGetAuth } = await import('firebase/auth');
-                              const idToken = await fsGetAuth().currentUser?.getIdToken();
+                              const idToken = await auth.currentUser?.getIdToken();
                               const res = await fetch('https://manabites.in/api/admin/create-restaurant-login', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },

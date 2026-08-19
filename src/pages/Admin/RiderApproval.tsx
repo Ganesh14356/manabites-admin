@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
-import { createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
 import {
   collection, query, where, onSnapshot, doc, getDocs,
   updateDoc, setDoc, deleteDoc, serverTimestamp, orderBy, Timestamp,
@@ -616,7 +616,6 @@ export default function RiderApproval() {
   const handleResetPassword = async (r: RiderDoc) => {
     if (!r.email) { toast.error('No email on file.'); return; }
     try {
-      const { sendPasswordResetEmail } = await import('firebase/auth');
       await sendPasswordResetEmail(auth, r.email);
       toast.success(`Password reset email sent to ${r.email}`);
     } catch (err) { toast.error(getFirebaseError(err)); }

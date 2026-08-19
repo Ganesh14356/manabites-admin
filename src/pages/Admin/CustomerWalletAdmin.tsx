@@ -35,7 +35,6 @@ export default function CustomerWalletAdmin() {
     setSelected(null);
     setCustomers([]);
     try {
-      const { getDoc, doc } = await import('firebase/firestore');
       const userSnap = await getDoc(doc(db, 'users', uid.trim()));
       const walletSnap = await getDoc(doc(db, 'wallets', uid.trim()));
       const balance = walletSnap.exists() ? (walletSnap.data()?.balance ?? 0) : 0;

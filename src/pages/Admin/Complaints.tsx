@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import {
   collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp,
-  getDoc, addDoc, Timestamp,
+  getDoc, addDoc, Timestamp, setDoc,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -230,7 +230,6 @@ export default function Complaints() {
       if (walletSnap?.exists()) {
         await updateDoc(walletRef, { balance: (walletSnap.data().balance ?? 0) + finalAmount, updatedAt: Timestamp.now() });
       } else {
-        const { setDoc } = await import('firebase/firestore');
         await setDoc(walletRef, { walletType: 'customer', ownerId: selected.customerId, balance: finalAmount, updatedAt: Timestamp.now() });
       }
 

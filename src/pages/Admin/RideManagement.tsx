@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, doc, onSnapshot, query, where, orderBy,
-  limit as fsLimit, updateDoc, getDocs, Timestamp,
+  limit as fsLimit, updateDoc, getDocs, Timestamp, setDoc, serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import toast from 'react-hot-toast';
@@ -682,7 +682,6 @@ function FareConfigTab() {
   const save = async () => {
     setSaving(true);
     try {
-      const { setDoc, serverTimestamp } = await import('firebase/firestore');
       await setDoc(doc(db, 'settings', 'cancellationPolicy'), { ...config, updatedAt: serverTimestamp() });
       toast.success('Cancellation policy saved');
     } catch { toast.error('Save failed'); }
