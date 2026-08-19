@@ -27,6 +27,7 @@ interface RestaurantSettlement {
   restaurantName: string;
   ordersCount: number;
   orderIds: string[];
+  customerCharged: number;
   grossAmount: number;
   commission: number;
   gstOnCommission: number;
@@ -49,6 +50,7 @@ interface Preview {
   restaurants: RestaurantSettlement[];
   riders: RiderSettlement[];
   totalOrders: number;
+  totalCustomerCharged: number;
   totalGross: number;
   totalCommission: number;
   totalNetToRestaurants: number;
@@ -117,20 +119,27 @@ export default function DailySettlements() {
           restMap.set(rid, {
             restaurantId: rid, restaurantName: name,
             ordersCount: 0, orderIds: [],
-            grossAmount: 0, commission: 0, gstOnCommission: 0, netAmount: 0,
+            customerCharged: 0, grossAmount: 0, commission: 0, gstOnCommission: 0, netAmount: 0,
           });
         }
         const r = restMap.get(rid)!;
-        const gross = order.subtotal ?? order.total ?? order.totalAmount ?? 0;
+        // restaurantSubtotal is the restaurant's true entered price (menu basePrice sum) --
+        // the platform's commission is already collected via the price markup the customer
+        // paid, so it must not be deducted again here. Falls back for orders placed before
+        // this field existed.
+        const chargedTotal = order.subtotal ?? order.total ?? order.totalAmount ?? 0;
+        const gross = order.restaurantSubtotal ?? Math.round(chargedTotal / 1.10);
         r.ordersCount++;
         r.orderIds.push(order.id);
+        r.customerCharged += chargedTotal;
         r.grossAmount += gross;
+        r.commission  += chargedTotal - gross; // informational: commission already collected via markup, not deducted again
       }
-      // Compute commission
+      // Restaurant receives their full base-price total -- no further deduction.
       for (const r of restMap.values()) {
-        r.commission      = +(r.grossAmount * commissionRate / 100).toFixed(2);
-        r.gstOnCommission = +(r.commission * 0.18).toFixed(2);
-        r.netAmount       = +(r.grossAmount - r.commission - r.gstOnCommission).toFixed(2);
+        r.gstOnCommission = 0;
+        r.commission      = +r.commission.toFixed(2);
+        r.netAmount       = +r.grossAmount.toFixed(2);
       }
 
       // Group by rider
@@ -165,6 +174,7 @@ export default function DailySettlements() {
         restaurants,
         riders,
         totalOrders: delivered.length,
+        totalCustomerCharged: +delivered.reduce((s, o) => s + (o.subtotal ?? o.total ?? o.totalAmount ?? 0), 0).toFixed(2),
         totalGross: +restaurants.reduce((s, r) => s + r.grossAmount, 0).toFixed(2),
         totalCommission: +restaurants.reduce((s, r) => s + r.commission + r.gstOnCommission, 0).toFixed(2),
         totalNetToRestaurants: +restaurants.reduce((s, r) => s + r.netAmount, 0).toFixed(2),
@@ -409,8 +419,8 @@ export default function DailySettlements() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { label: 'Orders', value: preview.totalOrders, sub: 'delivered & unsettled', color: 'border-blue-400' },
-                { label: 'Gross Revenue', value: toINR(preview.totalGross), sub: 'total from customers', color: 'border-gray-300' },
-                { label: 'Net to Restaurants', value: toINR(preview.totalNetToRestaurants), sub: `after ${preview.commissionRate}% commission`, color: 'border-orange-400' },
+                { label: 'Gross Revenue', value: toINR(preview.totalCustomerCharged), sub: 'total from customers', color: 'border-gray-300' },
+                { label: 'Net to Restaurants', value: toINR(preview.totalNetToRestaurants), sub: 'restaurant\'s own menu price', color: 'border-orange-400' },
                 { label: 'Rider Payouts', value: toINR(preview.totalRiderPay), sub: `₹${preview.riderPayPerDelivery}/delivery`, color: 'border-blue-400' },
               ].map(c => (
                 <div key={c.label} className={`bg-white rounded-2xl border-l-4 ${c.color} border border-gray-100 shadow-sm p-4`}>
@@ -426,7 +436,7 @@ export default function DailySettlements() {
               <AlertTriangle size={16} className="text-orange-500 flex-shrink-0 mt-0.5" />
               <div className="text-sm text-orange-700">
                 <span className="font-black">ManaBites earns:</span>{' '}
-                {toINR(preview.totalCommission)} (commission {preview.commissionRate}% + 18% GST) from {preview.totalOrders} orders.
+                {toINR(preview.totalCommission)} commission — already collected via the menu price markup, not deducted here — from {preview.totalOrders} orders.
                 Total outflow: {toINR(preview.totalNetToRestaurants + preview.totalRiderPay)}.
               </div>
             </div>
@@ -467,13 +477,13 @@ export default function DailySettlements() {
                           >
                             <div className="px-5 pb-4 bg-gray-50 grid grid-cols-3 gap-3 text-sm">
                               <div>
-                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Gross</p>
-                                <p className="font-black text-gray-900">{toINR(r.grossAmount)}</p>
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Customer Paid</p>
+                                <p className="font-black text-gray-900">{toINR(r.customerCharged)}</p>
                               </div>
                               <div>
-                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Commission + GST</p>
-                                <p className="font-black text-red-500">−{toINR(r.commission + r.gstOnCommission)}</p>
-                                <p className="text-[10px] text-gray-400">{toINR(r.commission)} + {toINR(r.gstOnCommission)} GST</p>
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Commission (already in price)</p>
+                                <p className="font-black text-orange-500">{toINR(r.commission)}</p>
+                                <p className="text-[10px] text-gray-400">collected via menu markup, not deducted</p>
                               </div>
                               <div>
                                 <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Net to Pay</p>
