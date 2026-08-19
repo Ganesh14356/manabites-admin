@@ -553,12 +553,16 @@ export default function OrderManagement() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* ── Rapido Manual Booking ─────────────────────────── */}
-                {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
+                {/* ── Rapido Manual Booking / Contact Info ─────────────── */}
+                {(() => {
+                  const isFinal = selectedOrder.status === 'delivered' || selectedOrder.status === 'cancelled';
+                  return (
                   <div className="border-2 border-yellow-300 bg-yellow-50 rounded-2xl p-4 space-y-4">
-                    <p className="text-xs font-black text-yellow-700 uppercase tracking-widest">🛵 Rapido Manual Booking</p>
+                    <p className="text-xs font-black text-yellow-700 uppercase tracking-widest">
+                      {isFinal ? '📞 Contact Info' : '🛵 Rapido Manual Booking'}
+                    </p>
 
-                    {/* STEP 1 — Locations */}
+                    {/* STEP 1 — Locations (always visible, even for cancelled/delivered orders) */}
                     <div className="bg-white rounded-xl p-3 space-y-2 border border-yellow-100">
                       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 1 — Locations చూడు</p>
                       <div className="grid grid-cols-2 gap-2">
@@ -583,6 +587,8 @@ export default function OrderManagement() {
                       </div>
                     </div>
 
+                    {!isFinal && (
+                    <>
                     {/* STEP 2 — Book on Rapido */}
                     <div className="bg-white rounded-xl p-3 space-y-2 border border-yellow-100">
                       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Step 2 — Rapido లో Book చేయి</p>
@@ -728,8 +734,10 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                         </button>
                       </div>
                     )}
+                    </>
+                    )}
 
-                    {/* Show saved info */}
+                    {/* Show saved info — kept visible even for cancelled/delivered orders for reference */}
                     {((selectedOrder as any).pickupOtp || (selectedOrder as any).rapidoRider?.name) && (
                       <div className="bg-white rounded-xl px-3 py-2 space-y-1 border border-yellow-100">
                         {(selectedOrder as any).pickupOtp && (
@@ -741,7 +749,8 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                       </div>
                     )}
                   </div>
-                )}
+                  );
+                })()}
 
                 {/* Status */}
                 <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between">
