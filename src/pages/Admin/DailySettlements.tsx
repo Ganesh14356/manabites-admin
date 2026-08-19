@@ -304,7 +304,11 @@ export default function DailySettlements() {
         const taxable     = +(subtotal / (1 + GST_RATE)).toFixed(2);
         const cgst        = +((taxable * GST_RATE) / 2).toFixed(2);
         const sgst        = cgst;
-        const commission  = +(subtotal * ((o.platformFee ? o.platformFee / subtotal : 0.15))).toFixed(2);
+        // Commission is already collected via the price markup the customer paid
+        // (subtotal), not a separate deduction -- match the same restaurantSubtotal
+        // source of truth used in the settlement totals above, not a flat 15% guess.
+        const restaurantPortion = o.restaurantSubtotal ?? Math.round(subtotal / 1.10);
+        const commission  = +(subtotal - restaurantPortion).toFixed(2);
         const commGST     = +(commission * COMM_GST).toFixed(2);
         const date        = o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString('en-IN') : '—';
 

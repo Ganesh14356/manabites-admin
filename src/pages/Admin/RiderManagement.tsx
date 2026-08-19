@@ -715,6 +715,19 @@ export default function RiderManagement() {
             });
             await deleteDoc(doc(db, 'riders', editTarget.phone));
           }
+
+          // Firestore docs above are just app-facing mirrors — the rider
+          // actually logs in via Firebase Auth phone OTP, so without this
+          // the Auth account still has the old number and phone-otp.cjs
+          // creates a brand-new disconnected account on the rider's next login.
+          const idToken = await auth.currentUser?.getIdToken();
+          const phoneRes = await fetch('https://manabites.in/api/admin-update-rider-phone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({ uid: editTarget.uid, newPhone: data.phone }),
+          });
+          const phoneData = await phoneRes.json();
+          if (!phoneRes.ok) throw new Error(phoneData.error || 'Failed to update rider login phone number');
         } else {
           const currentRiderSnap = await getDoc(doc(db, 'riders', data.phone));
           if (currentRiderSnap.exists()) {
