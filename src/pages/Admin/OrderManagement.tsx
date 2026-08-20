@@ -68,6 +68,19 @@ export default function OrderManagement() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const selectedOrder = useMemo(() => orders.find(o => o.id === selectedOrderId) ?? null, [orders, selectedOrderId]);
 
+  // order.customerPhone is the delivery-contact number the customer typed at
+  // checkout for THIS order (can be someone else's number, e.g. gifting an
+  // order) -- it is not their account login number, so look that up
+  // separately from users/{customerId}.
+  const [customerLoginPhone, setCustomerLoginPhone] = useState<string | null>(null);
+  useEffect(() => {
+    setCustomerLoginPhone(null);
+    if (!selectedOrder?.customerId) return;
+    getDoc(doc(db, 'users', selectedOrder.customerId)).then(snap => {
+      if (snap.exists()) setCustomerLoginPhone(snap.data()?.phone || snap.data()?.phoneNumber || null);
+    }).catch(() => {});
+  }, [selectedOrder?.customerId]);
+
   // Rider assignment state
   const [riders, setRiders] = useState<RiderOption[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -579,7 +592,18 @@ export default function OrderManagement() {
                           <p className="text-[9px] font-black text-green-500 uppercase">🏠 Drop</p>
                           <p className="text-xs font-bold text-gray-700 leading-tight">{selectedOrder.customerName}</p>
                           <p className="text-[10px] text-gray-400 leading-tight">{selectedOrder.deliveryAddress}</p>
-                          {(selectedOrder as any).customerPhone && <a href={`tel:${(selectedOrder as any).customerPhone}`} className="text-xs font-black text-green-600 block">{(selectedOrder as any).customerPhone}</a>}
+                          {(selectedOrder as any).customerPhone && (
+                            <div>
+                              <span className="text-[9px] text-gray-400">Delivery contact: </span>
+                              <a href={`tel:${(selectedOrder as any).customerPhone}`} className="text-xs font-black text-green-600">{(selectedOrder as any).customerPhone}</a>
+                            </div>
+                          )}
+                          {customerLoginPhone && customerLoginPhone !== (selectedOrder as any).customerPhone && (
+                            <div>
+                              <span className="text-[9px] text-gray-400">Login number: </span>
+                              <a href={`tel:${customerLoginPhone}`} className="text-xs font-black text-purple-600">{customerLoginPhone}</a>
+                            </div>
+                          )}
                           {(selectedOrder as any).customerLat && (
                             <a href={`https://maps.google.com/?q=${(selectedOrder as any).customerLat},${(selectedOrder as any).customerLng}`} target="_blank" rel="noopener noreferrer" className="text-[10px] text-green-500 underline">📍 Map చూడు</a>
                           )}
