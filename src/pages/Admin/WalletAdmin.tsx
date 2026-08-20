@@ -103,7 +103,7 @@ export default function WalletAdmin() {
             data.ownerName?.toLowerCase().includes(lower) ||
             data.displayName?.toLowerCase().includes(lower) ||
             data.email?.toLowerCase().includes(lower) ||
-            phone.includes(digits)
+            (digits.length > 0 && phone.includes(digits))
           ) {
             if (!seen.has(d.id)) { seen.add(d.id); hits.push({ id: d.id, ...data } as Entity); }
           }
