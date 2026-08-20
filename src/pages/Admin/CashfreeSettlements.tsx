@@ -5,7 +5,7 @@ import {
   collection, doc, updateDoc, onSnapshot,
   query, where, orderBy, getDoc, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import {
   Banknote, CheckCircle, Clock, XCircle, AlertTriangle,
   RefreshCw, Send, UserCheck, Bike, Store, Wallet,
@@ -57,9 +57,10 @@ function beneId(payout: PayoutDoc) {
 }
 
 async function callCashfree(action: string, params: Record<string, unknown>) {
+  const idToken = await auth.currentUser?.getIdToken();
   const res = await fetch('/api/cashfree', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ action, ...params }),
   });
   const data = await res.json();

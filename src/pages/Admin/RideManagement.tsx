@@ -10,7 +10,7 @@ import {
   collection, doc, onSnapshot, query, where, orderBy,
   limit as fsLimit, updateDoc, getDocs, Timestamp, setDoc, serverTimestamp,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import toast from 'react-hot-toast';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
@@ -296,9 +296,10 @@ function LiveRidesTab() {
     if (!confirm(`Cancel ride ${ride.id.slice(-6).toUpperCase()}? This will notify both parties.`)) return;
     setCancelling(ride.id);
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       await fetch('/api/ride-cancellation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ orderId: ride.id, cancelledBy: 'admin', reason: 'admin_cancel' }),
       });
       toast.success('Ride cancelled');

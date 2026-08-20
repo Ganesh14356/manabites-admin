@@ -6,7 +6,7 @@ import {
   collection, doc, updateDoc, getDocs, getDoc,
   onSnapshot, query, orderBy, where, limit, Timestamp
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import {
   Search, Eye, XCircle, UserPlus, MapPin, CheckCircle,
   AlertTriangle, Bike, ChevronDown, X, Clock,
@@ -256,9 +256,10 @@ export default function OrderManagement() {
         updatedAt:          Timestamp.now(),
       });
       // Trigger auto-refund
+      const idToken = await auth.currentUser?.getIdToken();
       fetch('/api/auto-refund', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body:    JSON.stringify({ orderId, cancelledBy: 'admin', cancellationReason: 'Admin cancelled' }),
       }).then(async r => {
         if (!r.ok) {

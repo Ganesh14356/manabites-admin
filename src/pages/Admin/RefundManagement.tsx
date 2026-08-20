@@ -5,7 +5,7 @@ import {
   collection, onSnapshot, query, where, doc, updateDoc, setDoc,
   addDoc, serverTimestamp, orderBy, writeBatch, getDoc, increment,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import { RefreshCw, CheckCircle, Clock, Search, X, AlertTriangle, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -464,8 +464,9 @@ export default function RefundManagement() {
                       onClick={async () => {
                         setSaving(true);
                         try {
+                          const idToken = await auth.currentUser?.getIdToken();
                           const r = await fetch('/api/auto-refund', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
                             body: JSON.stringify({ orderId: selected.id, cancelledBy: 'admin', cancellationReason: selected.refundNote || 'Admin refund' }),
                           });
                           const d = await r.json();

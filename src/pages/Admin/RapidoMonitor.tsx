@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { Zap, Clock, AlertTriangle, CheckCircle, XCircle, TrendingUp, IndianRupee, Power, Truck } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -197,9 +197,10 @@ export default function RapidoMonitor() {
         cancelledBy: 'admin',
       });
       // Trigger auto-refund (fire-and-forget; errors logged server-side)
+      const idToken = await auth.currentUser?.getIdToken();
       fetch('/api/auto-refund', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
         body: JSON.stringify({ orderId }),
       }).catch(() => {});
       toast.success('Order cancelled — refund processing');
