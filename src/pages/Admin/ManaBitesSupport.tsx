@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   collection, query, where, onSnapshot, limit,
-  addDoc, updateDoc, doc, setDoc, serverTimestamp,
+  addDoc, updateDoc, doc, setDoc, serverTimestamp, getDoc,
   increment, arrayUnion, orderBy, documentId,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -26,6 +26,17 @@ interface Msg {
   text:       string;
   createdAt:  any;
   readBy?:    string[];
+}
+
+// Real order number (e.g. "MB-HAN-260626-9112" or "#1023") -- matches the
+// format used everywhere else in the app instead of the raw doc-ID slice
+// (which looks like a random hash and doesn't match any number the
+// customer/restaurant/admin can see elsewhere).
+interface OrderMeta { displayOrderId?: string; orderNumber?: number }
+function fmtOrderNum(meta: OrderMeta | undefined, fallbackId: string) {
+  if (meta?.displayOrderId) return meta.displayOrderId;
+  if (meta?.orderNumber) return `#${meta.orderNumber}`;
+  return `#${fallbackId.slice(-6).toUpperCase()}`;
 }
 
 function tLabel(ts: any) {
@@ -84,6 +95,8 @@ function CustomerSupportTab({ adminUid, adminName }: { adminUid: string; adminNa
   const [sending,  setSending]  = useState(false);
   const [search,   setSearch]   = useState('');
   const [loading,  setLoading]  = useState(true);
+  const [orderMeta, setOrderMeta] = useState<Record<string, OrderMeta>>({});
+  const fetchedOrderIds = useRef<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
 
@@ -95,6 +108,27 @@ function CustomerSupportTab({ adminUid, adminName }: { adminUid: string; adminNa
       setLoading(false);
     }, () => setLoading(false));
   }, []);
+
+  // Look up the real order number for each conversation's orderId (once per id)
+  useEffect(() => {
+    const toFetch = convs.map(c => c.orderId).filter(oid => oid && !fetchedOrderIds.current.has(oid));
+    if (toFetch.length === 0) return;
+    toFetch.forEach(oid => fetchedOrderIds.current.add(oid));
+    (async () => {
+      const entries = await Promise.all(toFetch.map(async (oid) => {
+        try {
+          const snap = await getDoc(doc(db, 'orders', oid));
+          const d: any = snap.exists() ? snap.data() : {};
+          return [oid, { displayOrderId: d.displayOrderId, orderNumber: d.orderNumber }] as const;
+        } catch { return [oid, {}] as const; }
+      }));
+      setOrderMeta(prev => {
+        const next = { ...prev };
+        entries.forEach(([k, v]) => { next[k] = v; });
+        return next;
+      });
+    })();
+  }, [convs]);
 
   useEffect(() => {
     if (!selected) { setMessages([]); return; }
@@ -130,7 +164,14 @@ function CustomerSupportTab({ adminUid, adminName }: { adminUid: string; adminNa
     } finally { setSending(false); setTimeout(() => inputRef.current?.focus(), 50); }
   }, [text, selected, adminUid, adminName, sending]);
 
-  const filtered = convs.filter(c => !search || c.orderId?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = convs.filter(c => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const meta = orderMeta[c.orderId];
+    return c.orderId?.toLowerCase().includes(q) ||
+      meta?.displayOrderId?.toLowerCase().includes(q) ||
+      String(meta?.orderNumber ?? '').includes(q);
+  });
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -163,7 +204,7 @@ function CustomerSupportTab({ adminUid, adminName }: { adminUid: string; adminNa
                   {(conv.orderId || conv.id).slice(-2).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-xs text-gray-900">Order #{(conv.orderId || conv.id).slice(-6).toUpperCase()}</p>
+                  <p className="font-semibold text-xs text-gray-900">{fmtOrderNum(orderMeta[conv.orderId], conv.orderId || conv.id)}</p>
                   <p className="text-[10px] text-gray-400 truncate">{conv.lastMessage || 'No messages'}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -183,7 +224,7 @@ function CustomerSupportTab({ adminUid, adminName }: { adminUid: string; adminNa
             <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 md:hidden"><ChevronLeft size={18} /></button>
             <Headphones size={15} className="text-orange-500" />
             <div>
-              <p className="font-bold text-sm text-gray-900">Order #{selected.orderId?.slice(-6).toUpperCase()}</p>
+              <p className="font-bold text-sm text-gray-900">{fmtOrderNum(orderMeta[selected.orderId], selected.orderId || selected.id)}</p>
               <p className="text-xs text-gray-400">Customer Support</p>
             </div>
             <span className="ml-auto text-xs text-gray-400 flex items-center gap-1"><Clock size={11} />{tLabel(selected.lastAt)}</span>
