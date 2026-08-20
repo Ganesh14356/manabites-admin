@@ -4,7 +4,7 @@ import {
   collection, addDoc, serverTimestamp, onSnapshot,
   query, orderBy, getDocs, limit, deleteDoc, doc,
 } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { db, auth } from '../../firebase';
 import { Bell, Send, Users, Bike, Store, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -133,9 +133,10 @@ export default function NotificationsBroadcast() {
       let pushResult: { success: number; failed: number; total: number; skipped?: string; error?: string } =
         { success: 0, failed: 0, total: 0 };
       try {
+        const idToken = await auth.currentUser?.getIdToken();
         const resp = await fetch('/api/send-fcm', {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
           body:    JSON.stringify({ title: title.trim(), message: message.trim(), audience }),
         });
         const json = await resp.json();

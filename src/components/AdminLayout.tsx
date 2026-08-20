@@ -36,6 +36,8 @@ const BASE_NAV = [
   { name: 'Rating Appeals',       path: '/admin/rating-appeals',       icon: MessageSquareWarning },
   { name: 'SOS Alerts',           path: '/admin/sos-alerts',           icon: AlertTriangle },
   { name: 'Complaints',           path: '/admin/complaints',           icon: ClipboardList },
+  { name: 'Support Chats',        path: '/admin/support-chats',        icon: MessageCircle },
+  { name: 'Direct Chat',          path: '/admin/direct-chat',          icon: MessageCircle },
   { name: 'Customer Care',        path: '/admin/customer-care',        icon: Headphones },
   { name: 'Customers',            path: '/admin/customers',            icon: Users      },
   { name: 'Payouts',              path: '/admin/payouts',              icon: DollarSign },

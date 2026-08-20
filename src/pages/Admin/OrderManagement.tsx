@@ -316,15 +316,14 @@ export default function OrderManagement() {
       // Send push notification to customer when captain is on the way
       if (updates.status === 'out_for_delivery') {
         const captainName = rapidoForm.captainName.trim() || 'Rapido Captain';
-        fetch('/api/notify', {
+        fetch('/api/notify/order-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId:  selectedOrder.customerId,
-            orderId: selectedOrder.id,
-            title:   '🛵 Your order is on the way!',
-            body:    `${captainName} is delivering your order. ${rapidoForm.deliveryOtp ? `Delivery OTP: ${rapidoForm.deliveryOtp.trim()}` : ''}`.trim(),
-            type:    'order_update',
+            orderId:    selectedOrder.id,
+            status:     'out_for_delivery',
+            customerId: selectedOrder.customerId,
+            message:    `${captainName} is delivering your order. ${rapidoForm.deliveryOtp ? `Delivery OTP: ${rapidoForm.deliveryOtp.trim()}` : ''}`.trim(),
           }),
         }).catch(() => {});
       }

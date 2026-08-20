@@ -5,7 +5,7 @@ import {
   setDoc, updateDoc, deleteDoc, serverTimestamp, Timestamp, addDoc,
 } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { db, secondaryAuth } from '../../firebase';
+import { db, secondaryAuth, auth } from '../../firebase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logAuditEvent } from '../../services/auditLog';
 import toast from 'react-hot-toast';
@@ -571,9 +571,10 @@ export default function SubAdminManagement() {
       if (e.code === 'auth/email-already-in-use') {
         // Email already in Firebase Auth — look up existing UID and create only Firestore records
         try {
+          const idToken = await auth.currentUser?.getIdToken();
           const res = await fetch('/api/get-uid-by-email', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
             body: JSON.stringify({ email: formEmail.trim().toLowerCase() }),
           });
           if (!res.ok) throw new Error('Could not look up existing user');

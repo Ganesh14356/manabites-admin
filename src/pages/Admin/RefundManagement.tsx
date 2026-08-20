@@ -136,9 +136,10 @@ export default function RefundManagement() {
 
       // Trigger real Razorpay refund for original-payment orders
       if (selected.refundMethod === 'original' && selected.razorpayPaymentId) {
+        const idToken = await auth.currentUser?.getIdToken();
         const res = await fetch('/api/refund-payment', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
           body: JSON.stringify({ razorpayPaymentId: selected.razorpayPaymentId, amount: amt }),
         });
         const data = await res.json().catch(() => null);
