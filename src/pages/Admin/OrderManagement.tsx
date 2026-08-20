@@ -70,15 +70,26 @@ export default function OrderManagement() {
 
   // order.customerPhone is the delivery-contact number the customer typed at
   // checkout for THIS order (can be someone else's number, e.g. gifting an
-  // order) -- it is not their account login number, so look that up
-  // separately from users/{customerId}.
+  // order) -- it is not their account login number. Read the real number
+  // from Firebase Auth itself (server-side), not the Firestore
+  // users/{uid}.phone mirror -- that field is only backfilled client-side
+  // when the customer's own browser fires onAuthStateChanged, so it can be
+  // stale/empty even when the account genuinely has a phone linked.
   const [customerLoginPhone, setCustomerLoginPhone] = useState<string | null>(null);
   useEffect(() => {
     setCustomerLoginPhone(null);
     if (!selectedOrder?.customerId) return;
-    getDoc(doc(db, 'users', selectedOrder.customerId)).then(snap => {
-      if (snap.exists()) setCustomerLoginPhone(snap.data()?.phone || snap.data()?.phoneNumber || null);
-    }).catch(() => {});
+    (async () => {
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/admin-get-user-phone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ uid: selectedOrder.customerId }),
+      }).catch(() => null);
+      if (!res?.ok) return;
+      const data = await res.json().catch(() => null);
+      if (data?.phoneNumber) setCustomerLoginPhone(data.phoneNumber);
+    })();
   }, [selectedOrder?.customerId]);
 
   // Rider assignment state
