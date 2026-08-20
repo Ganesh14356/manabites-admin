@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   collection, getDocs, query, where, Timestamp,
-  writeBatch, doc, serverTimestamp, getDoc,
+  writeBatch, doc, serverTimestamp, getDoc, increment,
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import {
@@ -223,6 +223,25 @@ export default function DailySettlements() {
           periodStart: Timestamp.fromDate(new Date(preview.date + 'T00:00:00')),
           periodEnd:   Timestamp.fromDate(new Date(preview.date + 'T23:59:59')),
           createdAt: now,
+        });
+
+        // Mirror into restaurantEarnings so the restaurant's own app shows an
+        // accurate balance -- this was never written anywhere before, so
+        // EarningsHistory.tsx always showed an empty/zero "wallet" regardless
+        // of how much was actually settled. Riders already had this loop via
+        // riders/{id}.earnings incrementing on each delivery; restaurants had
+        // no equivalent accrual at all, only Payouts.tsx's decrement on paid.
+        batch.set(doc(db, 'restaurantEarnings', r.restaurantId), {
+          totalEarnings: increment(r.netAmount),
+          totalOrders:   increment(r.ordersCount),
+          ...(isManual ? {} : { pendingPayout: increment(r.netAmount) }),
+          updatedAt: now,
+        }, { merge: true });
+        batch.set(doc(collection(db, 'restaurantEarnings', r.restaurantId, 'history')), {
+          type:        'payout_settled',
+          amount:      r.netAmount,
+          description: `Settlement for ${preview.date} — ${r.ordersCount} orders${isManual ? ' (paid manually/offline)' : ''}`,
+          createdAt:   now,
         });
       }
 
