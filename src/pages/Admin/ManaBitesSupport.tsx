@@ -24,6 +24,8 @@ interface Msg {
   senderRole: string;
   senderName: string;
   text:       string;
+  type?:      string;
+  imageUrl?:  string;
   createdAt:  any;
   readBy?:    string[];
 }
@@ -68,7 +70,12 @@ function Bubble({ msg, isMine }: { msg: Msg; isMine: boolean }) {
             ? 'bg-orange-500 text-white rounded-br-sm'
             : 'bg-white text-gray-800 border border-gray-100 rounded-bl-sm'
           }`}>
-          <p className="break-words leading-relaxed">{msg.text}</p>
+          {msg.type === 'image' && msg.imageUrl && (
+            <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer">
+              <img src={msg.imageUrl} alt="Shared" className="rounded-xl mb-1 max-w-full max-h-64 object-cover" />
+            </a>
+          )}
+          {msg.text && <p className="break-words leading-relaxed">{msg.text}</p>}
         </div>
         <div className={`flex items-center gap-1 mt-0.5 ${isMine ? 'flex-row-reverse' : ''}`}>
           <span className="text-[10px] text-gray-400">{time}</span>
