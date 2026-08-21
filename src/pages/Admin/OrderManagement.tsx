@@ -92,6 +92,45 @@ export default function OrderManagement() {
     })();
   }, [selectedOrder?.customerId]);
 
+  // Item remove/replace state — for swapping an out-of-stock item after the
+  // restaurant already accepted the order.
+  const [restaurantMenu, setRestaurantMenu] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [editingItemIdx, setEditingItemIdx] = useState<number | null>(null);
+  const [itemActionBusy, setItemActionBusy] = useState(false);
+  useEffect(() => {
+    setRestaurantMenu([]);
+    setEditingItemIdx(null);
+    if (!selectedOrder?.restaurantId) return;
+    getDocs(query(collection(db, 'menuItems'), where('restaurantId', '==', selectedOrder.restaurantId)))
+      .then(snap => setRestaurantMenu(snap.docs.map(d => ({ id: d.id, name: d.data().name, price: d.data().price }))))
+      .catch(() => {});
+  }, [selectedOrder?.restaurantId]);
+
+  const handleItemAction = async (itemIndex: number, replacementItemId?: string) => {
+    if (!selectedOrder) return;
+    setItemActionBusy(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/admin-remove-order-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ orderId: selectedOrder.id, itemIndex, replacementItemId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      toast.success(
+        data.replacedWith
+          ? `Replaced with "${data.replacedWith}"${data.refundAmount > 0 ? ` · ₹${data.refundAmount} refunded` : ''}`
+          : `Removed · ₹${data.refundAmount} refunded to customer wallet`
+      );
+      setEditingItemIdx(null);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to update item');
+    } finally {
+      setItemActionBusy(false);
+    }
+  };
+
   // Rider assignment state
   const [riders, setRiders] = useState<RiderOption[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -1006,6 +1045,68 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                   </div>
                 </div>
               </div>
+
+              {/* ── Items (remove/replace out-of-stock) ──────────────────── */}
+              {Array.isArray((selectedOrder as any).items) && (selectedOrder as any).items.length > 0 && (() => {
+                const editable = ['pending', 'accepted', 'preparing', 'ready'].includes(selectedOrder.status);
+                return (
+                  <div className="border-2 border-gray-100 rounded-2xl p-4 space-y-2">
+                    <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">
+                      Items{!editable && ' (locked — rider already picked up or order finished)'}
+                    </p>
+                    {((selectedOrder as any).items as any[]).map((it, idx) => (
+                      <div key={idx} className="border border-gray-100 rounded-xl p-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-gray-800 truncate">
+                              {it.name} <span className="text-gray-400 font-normal">× {it.quantity ?? it.qty ?? 1}</span>
+                            </p>
+                            <p className="text-xs text-gray-400">₹{it.subtotal ?? it.price}</p>
+                          </div>
+                          {editable && (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                disabled={itemActionBusy}
+                                onClick={() => {
+                                  if (window.confirm(`Remove "${it.name}" and refund the customer?`)) handleItemAction(idx);
+                                }}
+                                className="px-2.5 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 disabled:opacity-50"
+                              >
+                                Remove
+                              </button>
+                              <button
+                                disabled={itemActionBusy}
+                                onClick={() => setEditingItemIdx(editingItemIdx === idx ? null : idx)}
+                                className="px-2.5 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold hover:bg-blue-100 disabled:opacity-50"
+                              >
+                                Replace
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {editingItemIdx === idx && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <select
+                              className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+                              defaultValue=""
+                              onChange={e => { if (e.target.value) handleItemAction(idx, e.target.value); }}
+                              disabled={itemActionBusy}
+                            >
+                              <option value="" disabled>Choose replacement item…</option>
+                              {restaurantMenu.map(m => (
+                                <option key={m.id} value={m.id}>{m.name} — ₹{m.price}</option>
+                              ))}
+                            </select>
+                            <button onClick={() => setEditingItemIdx(null)} className="text-xs text-gray-400 hover:text-gray-600">
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
 
               {/* ── Order Timeline ─────────────────────────────────────── */}
               {(() => {
