@@ -296,7 +296,7 @@ function LiveRidesTab() {
     if (!confirm(`Cancel ride ${ride.id.slice(-6).toUpperCase()}? This will notify both parties.`)) return;
     setCancelling(ride.id);
     try {
-      const idToken = await auth.currentUser?.getIdToken();
+      const idToken = await auth.currentUser?.getIdToken(true);
       await fetch('/api/ride-cancellation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },

@@ -110,7 +110,7 @@ export default function OrderManagement() {
     if (!selectedOrder) return;
     setItemActionBusy(true);
     try {
-      const idToken = await auth.currentUser?.getIdToken();
+      const idToken = await auth.currentUser?.getIdToken(true);
       const res = await fetch('/api/admin-remove-order-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
@@ -311,6 +311,42 @@ export default function OrderManagement() {
     return (Date.now() - t) > 10 * 60 * 1000;
   }), [orders]);
 
+  // Force-refresh the token (getIdToken(true)) rather than the cached one --
+  // a stale/expired cached token fails auth silently (auto-refund.cjs
+  // returns "Invalid token") and the refund is just dropped with only a
+  // toast the admin may not have seen. Exposed standalone so a stuck
+  // cancelled-but-unrefunded order can be retried from the details panel
+  // without re-cancelling it.
+  const [retryingRefund, setRetryingRefund] = useState(false);
+  const triggerRefund = async (orderId: string) => {
+    try {
+      const idToken = await auth.currentUser?.getIdToken(true);
+      const res = await fetch('/api/auto-refund', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body:    JSON.stringify({ orderId, cancelledBy: 'admin', cancellationReason: 'Admin cancelled' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(`Refund failed: ${data.error || res.status}`);
+        return false;
+      }
+      toast.success(
+        data.alreadyProcessed ? 'Already refunded' : `₹${data.refundAmount ?? 0} refunded to customer wallet`
+      );
+      return true;
+    } catch {
+      toast.error('Refund request failed — check connection and retry');
+      return false;
+    }
+  };
+
+  const handleRetryRefund = async (orderId: string) => {
+    setRetryingRefund(true);
+    await triggerRefund(orderId);
+    setRetryingRefund(false);
+  };
+
   const handleCancelOrder = async (orderId: string) => {
     if (!window.confirm('Cancel this order and trigger auto-refund?')) return;
     const order = orders.find(o => o.id === orderId);
@@ -322,19 +358,8 @@ export default function OrderManagement() {
         cancellationReason: 'Admin cancelled',
         updatedAt:          Timestamp.now(),
       });
-      // Trigger auto-refund
-      const idToken = await auth.currentUser?.getIdToken();
-      fetch('/api/auto-refund', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-        body:    JSON.stringify({ orderId, cancelledBy: 'admin', cancellationReason: 'Admin cancelled' }),
-      }).then(async r => {
-        if (!r.ok) {
-          const e = await r.json().catch(() => ({}));
-          toast.error(`Refund failed: ${e.error || r.status}`);
-        }
-      }).catch(() => toast.error('Refund request failed — check server logs'));
-      toast.success('Order cancelled and refund triggered');
+      toast.success('Order cancelled — processing refund…');
+      await triggerRefund(orderId);
       setSelectedOrderId(null);
     } catch {
       toast.error('Failed to cancel order');
@@ -1224,6 +1249,15 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                       <XCircle className="w-4 h-4" /> Cancel Order
                     </button>
                   </>
+                )}
+                {selectedOrder.status === 'cancelled' && !(selectedOrder as any).refundStatus && (
+                  <button
+                    onClick={() => handleRetryRefund(selectedOrder.id)}
+                    disabled={retryingRefund}
+                    className="w-full py-2.5 bg-amber-100 text-amber-800 font-bold rounded-xl text-sm hover:bg-amber-200 flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-4 h-4" /> {retryingRefund ? 'Retrying…' : 'Retry Refund (not yet credited)'}
+                  </button>
                 )}
               </div>
             </motion.div>

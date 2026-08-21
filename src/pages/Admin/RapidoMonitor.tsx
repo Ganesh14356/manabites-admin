@@ -197,7 +197,7 @@ export default function RapidoMonitor() {
         cancelledBy: 'admin',
       });
       // Trigger auto-refund (fire-and-forget; errors logged server-side)
-      const idToken = await auth.currentUser?.getIdToken();
+      const idToken = await auth.currentUser?.getIdToken(true);
       fetch('/api/auto-refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
