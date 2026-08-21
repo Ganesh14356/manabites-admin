@@ -118,10 +118,14 @@ export default function OrderManagement() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
+      const delta = data.walletDelta ?? 0;
+      const moneyPart = delta > 0
+        ? ` · ₹${delta} refunded to customer wallet`
+        : delta < 0
+          ? ` · ₹${-delta} charged to customer wallet (replacement costs more)`
+          : '';
       toast.success(
-        data.replacedWith
-          ? `Replaced with "${data.replacedWith}"${data.refundAmount > 0 ? ` · ₹${data.refundAmount} refunded` : ''}`
-          : `Removed · ₹${data.refundAmount} refunded to customer wallet`
+        (data.replacedWith ? `Replaced with "${data.replacedWith}"` : 'Item removed') + moneyPart
       );
       setEditingItemIdx(null);
     } catch (e: any) {
@@ -1089,7 +1093,20 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                             <select
                               className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
                               defaultValue=""
-                              onChange={e => { if (e.target.value) handleItemAction(idx, e.target.value); }}
+                              onChange={e => {
+                                const replacementId = e.target.value;
+                                if (!replacementId) return;
+                                const qty = it.quantity ?? it.qty ?? 1;
+                                const oldAmount = it.subtotal ?? (it.price ?? 0) * qty;
+                                const chosen = restaurantMenu.find(m => m.id === replacementId);
+                                const newAmount = (chosen?.price ?? 0) * qty;
+                                const delta = oldAmount - newAmount;
+                                const msg = delta < 0
+                                  ? `"${chosen?.name}" costs ₹${-delta} more — that will be charged to the customer's wallet (may go negative). Continue?`
+                                  : `Replace "${it.name}" with "${chosen?.name}"?`;
+                                if (window.confirm(msg)) handleItemAction(idx, replacementId);
+                                e.target.value = '';
+                              }}
                               disabled={itemActionBusy}
                             >
                               <option value="" disabled>Choose replacement item…</option>
