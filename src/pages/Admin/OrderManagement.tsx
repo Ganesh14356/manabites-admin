@@ -10,7 +10,7 @@ import { db, auth } from '../../firebase';
 import {
   Search, Eye, XCircle, UserPlus, MapPin, CheckCircle,
   AlertTriangle, Bike, ChevronDown, X, Clock,
-  Siren, Zap, RefreshCw, ChevronRight,
+  Siren, Zap, RefreshCw, ChevronRight, Phone, Printer,
 } from 'lucide-react';
 
 interface OrderDoc {
@@ -440,6 +440,78 @@ export default function OrderManagement() {
     } catch {
       toast.error('Failed to mark delivered');
     }
+  };
+
+  const ALL_STATUSES = ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'out_for_delivery', 'delivered', 'cancelled', 'customer_unavailable'];
+  const [overrideStatusValue, setOverrideStatusValue] = useState('');
+  const handleManualStatusOverride = async (orderId: string, newStatus: string) => {
+    if (!newStatus) return;
+    if (!window.confirm(`Force order status to "${newStatus.replace(/_/g, ' ')}"? This bypasses the normal order flow.`)) return;
+    try {
+      const now = Timestamp.now();
+      // Stamp the matching stage timestamp too so the Order Timeline reflects
+      // the override instead of showing a gap for the skipped stage.
+      const stageTimestampField: Record<string, string> = {
+        accepted: 'acceptedAt', preparing: 'preparingAt', ready: 'readyAt',
+        picked_up: 'pickedUpAt', out_for_delivery: 'pickedUpAt', delivered: 'deliveredAt',
+      };
+      const tsField = stageTimestampField[newStatus];
+      await updateDoc(doc(db, 'orders', orderId), {
+        status: newStatus,
+        updatedAt: now,
+        adminOverride: true,
+        adminOverrideAt: now,
+        adminOverrideTo: newStatus,
+        ...(tsField ? { [tsField]: now } : {}),
+      });
+      toast.success(`Order status set to "${newStatus.replace(/_/g, ' ')}"`);
+      setOverrideStatusValue('');
+    } catch {
+      toast.error('Failed to override status');
+    }
+  };
+
+  const handlePrintInvoice = (order: OrderDoc) => {
+    const o = order as any;
+    const itemsHtml = (order.items || []).map((it: any) => `
+      <tr>
+        <td>${it.name}</td>
+        <td style="text-align:center">${it.quantity ?? it.qty ?? 1}</td>
+        <td style="text-align:right">₹${(it.price ?? 0).toFixed(2)}</td>
+        <td style="text-align:right">₹${((it.price ?? 0) * (it.quantity ?? it.qty ?? 1)).toFixed(2)}</td>
+      </tr>`).join('');
+    const html = `<!doctype html><html><head><title>Invoice ${order.id}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#111}
+        h1{font-size:18px;margin:0 0 4px}
+        table{width:100%;border-collapse:collapse;margin-top:16px}
+        th,td{padding:6px 8px;border-bottom:1px solid #eee;font-size:13px}
+        th{text-align:left;background:#f7f7f7}
+        tfoot td{border:none;font-weight:bold}
+        .muted{color:#666;font-size:12px}
+      </style></head>
+      <body>
+        <h1>ManaBites — Order Invoice</h1>
+        <p class="muted">Order ID: ${order.id}</p>
+        <p class="muted">Date: ${formatDate(order.createdAt)}</p>
+        <p><strong>Restaurant:</strong> ${order.restaurantName || '-'}<br/>
+           <strong>Customer:</strong> ${order.customerName || '-'}<br/>
+           <strong>Delivery Address:</strong> ${order.deliveryAddress || '-'}</p>
+        <table>
+          <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Subtotal</th></tr></thead>
+          <tbody>${itemsHtml}</tbody>
+          <tfoot>
+            <tr><td colspan="3">Delivery Fee</td><td style="text-align:right">₹${(order.deliveryFee || 0).toFixed(2)}</td></tr>
+            <tr><td colspan="3">Taxes &amp; Platform Fee</td><td style="text-align:right">₹${((order.tax || 0) + (order.platformFee || 0)).toFixed(2)}</td></tr>
+            <tr><td colspan="3">Grand Total</td><td style="text-align:right">₹${(order.totalAmount || 0).toFixed(2)}</td></tr>
+          </tfoot>
+        </table>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Popup blocked — allow popups to print the invoice'); return; }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 300);
   };
 
   const handleTogglePriority = async (orderId: string, current: boolean) => {
@@ -933,6 +1005,18 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                       <p className="text-sm font-bold text-gray-800">{selectedOrder.riderName || 'Not Assigned'}</p>
                       <p className="text-xs text-gray-500">Delivery Partner</p>
                     </div>
+                    {(() => {
+                      const riderPhone = (selectedOrder as any).riderPhone || riders.find(r => r.uid === selectedOrder.riderId)?.phone;
+                      return riderPhone ? (
+                        <a
+                          href={`tel:${riderPhone}`}
+                          title={`Call ${selectedOrder.riderName || 'rider'}`}
+                          className="w-8 h-8 flex items-center justify-center bg-green-50 text-green-700 rounded-lg hover:bg-green-100 flex-shrink-0"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null;
+                    })()}
                     {selectedOrder.status !== 'delivered' && selectedOrder.status !== 'cancelled' && (
                       <motion.button
                         whileTap={{ scale: 0.96 }}
@@ -1073,7 +1157,6 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                     )}
                   </div>
                 </div>
-              </div>
 
               {/* ── Items (remove/replace out-of-stock) ──────────────────── */}
               {Array.isArray((selectedOrder as any).items) && (selectedOrder as any).items.length > 0 && (() => {
@@ -1191,9 +1274,43 @@ ${custLat && custLng ? `Maps: https://maps.google.com/?q=${custLat},${custLng}` 
                   </div>
                 );
               })()}
+              </div>
 
               {/* ── Admin Actions ──────────────────────────────────────── */}
               <div className="p-6 border-t border-gray-100 bg-gray-50 space-y-2">
+                <button
+                  onClick={() => handlePrintInvoice(selectedOrder)}
+                  className="w-full py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-gray-200"
+                >
+                  <Printer className="w-4 h-4" /> Print / Export Invoice
+                </button>
+
+                <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Manual Status Override</p>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <select
+                        value={overrideStatusValue}
+                        onChange={e => setOverrideStatusValue(e.target.value)}
+                        className="w-full appearance-none border border-gray-200 rounded-lg pl-2.5 pr-7 py-2 text-xs"
+                      >
+                        <option value="">Choose status…</option>
+                        {ALL_STATUSES.filter(s => s !== selectedOrder.status).map(s => (
+                          <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                    </div>
+                    <button
+                      onClick={() => handleManualStatusOverride(selectedOrder.id, overrideStatusValue)}
+                      disabled={!overrideStatusValue}
+                      className="px-4 py-2 bg-gray-800 text-white font-bold rounded-lg text-xs hover:bg-gray-900 disabled:opacity-40"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+
                 {selectedOrder.status !== 'cancelled' && selectedOrder.status !== 'delivered' && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
