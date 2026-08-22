@@ -20,7 +20,16 @@ import {
   Activity, AlertTriangle, Ban, Car, CheckCircle, Clock,
   DollarSign, Download, Eye, MapPin, Phone, RefreshCw,
   TrendingUp, Users, Zap, XCircle, Shield, Package, Bike,
+  X, ChevronDown, Printer,
 } from 'lucide-react';
+
+function fmtDate(ts: any): string {
+  if (!ts) return '—';
+  const d = typeof ts === 'number' ? new Date(ts) : (ts?.toDate ? ts.toDate() : new Date(ts));
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+const RIDE_STATUSES = ['pending', 'accepted', 'at_restaurant', 'picked_up', 'at_customer', 'delivered', 'completed', 'cancelled', 'customer_unavailable'];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -277,6 +286,8 @@ function LiveRidesTab() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [selectedRideId, setSelectedRideId] = useState<string | null>(null);
+  const [overrideStatus, setOverrideStatus] = useState('');
 
   useEffect(() => {
     const ACTIVE = ['pending','accepted','at_restaurant','picked_up','at_customer','out_for_delivery','customer_unavailable','searching'];
@@ -306,6 +317,61 @@ function LiveRidesTab() {
     } catch { toast.error('Failed to cancel'); }
     finally { setCancelling(null); }
   };
+
+  const handleManualStatusOverride = async (ride: RideOrder, newStatus: string) => {
+    if (!newStatus) return;
+    if (!confirm(`Force ride ${ride.id.slice(-6).toUpperCase()} status to "${newStatus.replace(/_/g, ' ')}"? This bypasses the normal ride flow.`)) return;
+    try {
+      const now = Date.now();
+      const stageField: Record<string, string> = {
+        accepted: 'acceptedAt', at_restaurant: 'arrivedAtPickup', picked_up: 'pickedUpAt',
+        at_customer: 'arrivedAtDrop', delivered: 'deliveredAt', completed: 'deliveredAt',
+      };
+      const tsField = stageField[newStatus];
+      await updateDoc(doc(db, 'orders', ride.id), {
+        status: newStatus,
+        updatedAt: now,
+        adminOverride: true,
+        adminOverrideAt: now,
+        adminOverrideTo: newStatus,
+        ...(tsField ? { [tsField]: now } : {}),
+      });
+      toast.success(`Ride status set to "${newStatus.replace(/_/g, ' ')}"`);
+      setOverrideStatus('');
+    } catch { toast.error('Failed to override status'); }
+  };
+
+  const handlePrintRideInvoice = (ride: RideOrder) => {
+    const html = `<!doctype html><html><head><title>Ride Invoice ${ride.id}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#111}
+        h1{font-size:18px;margin:0 0 4px}
+        table{width:100%;border-collapse:collapse;margin-top:16px}
+        th,td{padding:6px 8px;border-bottom:1px solid #eee;font-size:13px;text-align:left}
+        .muted{color:#666;font-size:12px}
+      </style></head>
+      <body>
+        <h1>ManaBites / Berooz — Ride Invoice</h1>
+        <p class="muted">Ride ID: ${ride.id}</p>
+        <p class="muted">Date: ${fmtDate(ride.createdAt)}</p>
+        <table>
+          <tr><th>Customer</th><td>${ride.customerName || '-'} ${ride.customerPhone ? `(${ride.customerPhone})` : ''}</td></tr>
+          <tr><th>Rider</th><td>${ride.riderName || 'Unassigned'} ${ride.riderPhone ? `(${ride.riderPhone})` : ''}</td></tr>
+          <tr><th>Vehicle</th><td>${ride.vehicleType || '-'}</td></tr>
+          <tr><th>Pickup</th><td>${fmtAddr(ride.pickupAddress)}</td></tr>
+          <tr><th>Drop</th><td>${fmtAddr(ride.dropAddress)}</td></tr>
+          <tr><th>Distance</th><td>${(ride.distanceKm || ride.distance || 0).toFixed(1)} km</td></tr>
+          <tr><th>Fare</th><td><strong>${fmt(ride.fare || 0)}</strong></td></tr>
+        </table>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Popup blocked — allow popups to print the invoice'); return; }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => { w.focus(); w.print(); }, 300);
+  };
+
+  const selectedRide = selectedRideId ? rides.find(r => r.id === selectedRideId) ?? null : null;
 
   const filtered = rides.filter(r =>
     !search ||
@@ -411,6 +477,12 @@ function LiveRidesTab() {
                     </button>
                   )}
                   <button
+                    onClick={() => { setSelectedRideId(ride.id); setOverrideStatus(''); }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gray-100 text-gray-600 text-xs font-bold"
+                  >
+                    <Eye size={11} /> Details
+                  </button>
+                  <button
                     onClick={() => handleCancelRide(ride)}
                     disabled={cancelling === ride.id}
                     className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 text-red-600 text-xs font-bold disabled:opacity-50"
@@ -423,6 +495,171 @@ function LiveRidesTab() {
           ))}
         </div>
       )}
+
+      {/* ── Ride Details Modal ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {selectedRide && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-40" onClick={() => setSelectedRideId(null)}
+            />
+            <motion.div
+              initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 280 }}
+              className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-white z-50 shadow-2xl flex flex-col"
+            >
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-black text-gray-800">Ride Details</h2>
+                  <p className="text-xs text-gray-500 font-mono mt-1">#{selectedRide.id.slice(-6).toUpperCase()}</p>
+                </div>
+                <button onClick={() => setSelectedRideId(null)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200">
+                  <X className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                {/* Status */}
+                <div className="bg-gray-50 p-4 rounded-xl flex items-center justify-between">
+                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${STATUS_COLORS[selectedRide.status] || 'bg-gray-100 text-gray-600'}`}>
+                    {selectedRide.status.replace(/_/g, ' ')}
+                  </span>
+                  <span className="font-black text-lg text-gray-800">{fmt(selectedRide.fare || 0)}</span>
+                </div>
+
+                {/* People */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Customer</p>
+                      <p className="font-semibold text-gray-800">{selectedRide.customerName || '—'}</p>
+                    </div>
+                    {selectedRide.customerPhone && (
+                      <a href={`tel:${selectedRide.customerPhone}`} className="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg">
+                        <Phone size={14} />
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Rider</p>
+                      <p className="font-semibold text-gray-800">{selectedRide.riderName || 'Unassigned'}</p>
+                    </div>
+                    {selectedRide.riderPhone && (
+                      <a href={`tel:${selectedRide.riderPhone}`} className="w-8 h-8 flex items-center justify-center bg-green-50 text-green-600 rounded-lg">
+                        <Phone size={14} />
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Trip details */}
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Pickup</p>
+                    <p className="text-gray-700">{fmtAddr(selectedRide.pickupAddress)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Drop</p>
+                    <p className="text-gray-700">{fmtAddr(selectedRide.dropAddress)}</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <span className="text-xs text-gray-500">{(selectedRide.distanceKm || selectedRide.distance || 0).toFixed(1)} km</span>
+                    <span className="text-xs text-gray-500">{selectedRide.vehicleType || 'Bike'}</span>
+                  </div>
+                </div>
+
+                {/* Timeline */}
+                {(() => {
+                  const r = selectedRide as any;
+                  const TIMELINE = [
+                    { label: 'Requested',       ts: r.createdAt,       emoji: '📝' },
+                    { label: 'Rider Accepted',  ts: r.acceptedAt,      emoji: '✅' },
+                    { label: 'Rider Arrived',   ts: r.arrivedAtPickup, emoji: '📍' },
+                    { label: 'Picked Up',       ts: r.pickedUpAt,      emoji: '⬆️' },
+                    { label: 'Reached Drop',    ts: r.arrivedAtDrop,   emoji: '🏁' },
+                    { label: 'Completed',       ts: r.deliveredAt,     emoji: '🏠' },
+                    { label: 'Cancelled',       ts: r.cancelledAt,     emoji: '❌' },
+                  ];
+                  const steps = TIMELINE.filter(s => s.ts);
+                  if (!steps.length) return null;
+                  return (
+                    <div>
+                      <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-3">Timeline</p>
+                      <div className="relative">
+                        <div className="absolute left-3 top-0 bottom-0 w-0.5 bg-gray-100" />
+                        <div className="space-y-3">
+                          {steps.map((s, i) => (
+                            <div key={i} className="flex items-start gap-3 relative">
+                              <div className="w-7 h-7 rounded-full bg-white border-2 border-green-500 flex items-center justify-center text-sm z-10 flex-shrink-0">
+                                {s.emoji}
+                              </div>
+                              <div className="pt-0.5">
+                                <p className="text-sm font-bold text-gray-800">{s.label}</p>
+                                <p className="text-xs text-gray-400">{fmtDate(s.ts)}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {r.cancelReason && (
+                        <div className="mt-3 bg-red-50 rounded-xl px-3 py-2 text-xs text-red-700 font-bold">
+                          ❌ Cancelled: {r.cancelReason} {r.cancelledBy ? `(by ${r.cancelledBy})` : ''}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Actions footer */}
+              <div className="p-6 border-t border-gray-100 bg-gray-50 space-y-2">
+                <button
+                  onClick={() => handlePrintRideInvoice(selectedRide)}
+                  className="w-full py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl text-sm flex items-center justify-center gap-2 hover:bg-gray-200"
+                >
+                  <Printer className="w-4 h-4" /> Print / Export Invoice
+                </button>
+
+                <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Manual Status Override</p>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <select
+                        value={overrideStatus}
+                        onChange={e => setOverrideStatus(e.target.value)}
+                        className="w-full appearance-none border border-gray-200 rounded-lg pl-2.5 pr-7 py-2 text-xs"
+                      >
+                        <option value="">Choose status…</option>
+                        {RIDE_STATUSES.filter(s => s !== selectedRide.status).map(s => (
+                          <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                    </div>
+                    <button
+                      onClick={() => handleManualStatusOverride(selectedRide, overrideStatus)}
+                      disabled={!overrideStatus}
+                      className="px-4 py-2 bg-gray-800 text-white font-bold rounded-lg text-xs hover:bg-gray-900 disabled:opacity-40"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleCancelRide(selectedRide)}
+                  disabled={cancelling === selectedRide.id}
+                  className="w-full py-2.5 bg-red-100 text-red-700 font-bold rounded-xl text-sm hover:bg-red-200 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Ban className="w-4 h-4" /> Cancel Ride
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
